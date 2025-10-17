@@ -1,0 +1,108 @@
+// In Audit.gs
+
+/**
+ * Appends a new log entry to the Audit Log Sheet.
+ */
+function createAuditLog(details) {
+  try {
+    const sheet = SpreadsheetApp.openById(AUDIT_LOG_FILE_ID).getSheets()[0];
+    const user = details.user || Session.getActiveUser().getEmail();
+    const action = details.action || 'Unknown';
+    const caseId = details.caseId || 'N/A';
+    const targetId = details.targetId || 'N/A';
+    const detailText = details.details || '';
+    const newRow = [new Date(), user, action, caseId, targetId, detailText];
+    sheet.appendRow(newRow);
+  } catch (e) {
+    Logger.log(`Failed to create audit log. Error: ${e.message}`);
+  }
+}
+
+/**
+ * Stores a key-value pair for system properties (like last sync time).
+ */
+function setSystemProperty(key, value) {
+  PropertiesService.getScriptProperties().setProperty(key, value);
+}
+
+/**
+ * Retrieves a system property value.
+ */
+function getSystemProperty(key) {
+  return PropertiesService.getScriptProperties().getProperty(key);
+}
+
+/**
+ * Main backend function to gather all data for the Audit Log page.
+ * This version includes new logic to parse log details for accurate scorecard counts.
+ */
+function getAuditData() {
+  try {
+    const taskCount = readCSV(SUB_TASK_FILE_ID).length;
+    const escCount = readCSV(ESCALATION_LOGS_FILE_ID).length;
+    const pauseCount = readCSV(PAUSE_LOGS_FILE_ID).length;
+    const lastSync = getSystemProperty('lastSync');
+    const lastBackup = getSystemProperty('lastBackup');
+
+    const sheet = SpreadsheetApp.openById(AUDIT_LOG_FILE_ID).getSheets()[0];
+    const logData = sheet.getDataRange().getValues();
+    const logHeaders = logData.shift(); 
+    
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    
+    // MODIFICATION: Reset counters
+    let actionsToday = 0;
+    let actionsThisMonth = 0;
+
+    const formattedLogs = logData.map(row => {
+      const timestamp = new Date(row[0]);
+      const action = row[2];
+      const details = row[5];
+      
+      // MODIFICATION: New logic to parse log details and count actions
+      let actionCount = 0;
+      if (action === 'Data Sync') {
+        const updates = (details.match(/Updated (\d+) tasks/i) || [])[1] || 0;
+        const newTasks = (details.match(/Added (\d+) new tasks/i) || [])[1] || 0;
+        const newEsc = (details.match(/Added (\d+) new escalations/i) || [])[1] || 0;
+        const newPauses = (details.match(/Added (\d+) new pauses/i) || [])[1] || 0;
+        actionCount = parseInt(updates) + parseInt(newTasks) + parseInt(newEsc) + parseInt(newPauses);
+      } else {
+        // Count all other actions as 1
+        actionCount = 1;
+      }
+
+      if (timestamp >= startOfDay) actionsToday += actionCount;
+      if (timestamp >= startOfMonth) actionsThisMonth += actionCount;
+      // --- END OF MODIFICATION ---
+      
+      return {
+        timestamp: timestamp.toISOString(),
+        user: row[1],
+        action: row[2],
+        caseId: row[3],
+        targetId: row[4],
+        details: row[5]
+      };
+    }).reverse(); // Show most recent first
+
+    return {
+      success: true,
+      scorecards: {
+        actionsToday: actionsToday,
+        actionsThisMonth: actionsThisMonth,
+        totalTasks: taskCount,
+        totalEscalations: escCount,
+        totalPauses: pauseCount,
+        lastSync: lastSync ? new Date(lastSync).toLocaleString() : 'Never',
+        lastBackup: lastBackup ? new Date(lastBackup).toLocaleString() : 'Never'
+      },
+      logs: formattedLogs
+    };
+
+  } catch (e) {
+    return { success: false, message: 'Failed to load audit data: ' + e.toString() };
+  }
+}

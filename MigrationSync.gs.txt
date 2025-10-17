@@ -1,0 +1,127 @@
+// ==============================================================================
+// MIGRATION & CLEANSING SCRIPT (FINAL VERSION)
+// ==============================================================================
+
+// --- CONFIGURATION ---
+// These constants point to the tables in your AppSheet Database that need cleaning.
+const MIGRATION_SOURCE_TASKS_TABLE = "Completed_Cases";
+const MIGRATION_SOURCE_ESCALATIONS_TABLE = "Completed_Escalation_Logs";
+const MIGRATION_SOURCE_PAUSES_TABLE = "Completed_Pause_Logs";
+
+/**
+ * A one-time manual function to clean up any "stray" active logs from the AppSheet Database.
+ * It identifies which cases are now in the active Google Sheet and deletes their
+ * corresponding escalation and pause logs from the AppSheet DB to prevent duplication.
+ * This function is SAFE TO RE-RUN. It prevents duplicates and uses batching to avoid timeouts.
+ * * To run: Select 'cleanupStrayActiveLogsFromDB' from the dropdown and click 'Run'.
+ */
+function cleanupStrayActiveLogsFromDB() {
+  Logger.log('--- Starting Cleanup of Stray Active Logs from Database ---');
+  
+  try {
+    // --- Step 1: Get the list of all "Case IDs" and "Task Types" that are currently ACTIVE ---
+    // The source of truth for active cases is now the Google Sheet.
+    Logger.log(`Reading active cases from Google Sheet ID: ${ACTIVE_TASKS_SHEET_ID}`);
+    const activeTasks = fetchFromGoogleSheet_(ACTIVE_TASKS_SHEET_ID);
+    if (!activeTasks || activeTasks.length === 0) {
+      Logger.log('No active tasks found in the Google Sheet. No cleanup needed.');
+      return;
+    }
+    
+    // Create a unique key for each active task: "CaseID|TaskType" for precise matching.
+    const activeTaskKeys = new Set(activeTasks.map(task => `${String(task['Case ID']).trim()}|${String(task['Task Type'] || task['Task Type']).trim()}`));
+    Logger.log(`Found ${activeTaskKeys.size} unique active Case ID/Task Type combinations in the Google Sheet.`);
+
+    // --- Step 2: Fetch all logs from the AppSheet Database tables ---
+    Logger.log('Fetching all escalation and pause logs from the AppSheet Database...');
+    const dbEscalations = fetchFromAppSheetAPI_(MIGRATION_SOURCE_ESCALATIONS_TABLE);
+    const dbPauses = fetchFromAppSheetAPI_(MIGRATION_SOURCE_PAUSES_TABLE);
+
+    // --- Step 3: Identify which logs in the database belong to an ACTIVE task ---
+    const escalationsToDelete = dbEscalations.filter(log => {
+      const key = `${String(log['Related Case ID']).trim()}|${String(log['Task Type']).trim()}`;
+      return activeTaskKeys.has(key);
+    });
+    const pausesToDelete = dbPauses.filter(log => {
+      const key = `${String(log['Related Case ID']).trim()}|${String(log['Task Type'] || log['Task Type']).trim()}`;
+      return activeTaskKeys.has(key);
+    });
+
+    if (escalationsToDelete.length === 0 && pausesToDelete.length === 0) {
+      Logger.log('No stray active logs found in the AppSheet Database. Cleanup complete.');
+      return;
+    }
+    Logger.log(`Identified ${escalationsToDelete.length} stray escalation logs and ${pausesToDelete.length} stray pause logs to be deleted.`);
+
+    // --- Step 4 (Safety Check): Copy any logs that might be missing from the destination ---
+    // This makes the script safe to re-run even if the copy part failed before.
+    appendData(ACTIVE_ESCALATIONS_SHEET_ID, escalationsToDelete, 'Log ID');
+    appendData(ACTIVE_PAUSES_SHEET_ID, pausesToDelete, 'Log ID');
+
+    // --- Step 5: Delete the identified stray logs from the database in batches ---
+    const batchDelete = (tableName, recordsToDelete) => {
+      if (recordsToDelete.length === 0) {
+        Logger.log(`No records to delete from ${tableName}.`);
+        return;
+      }
+      const batchSize = 100; // Delete 100 records at a time
+      Logger.log(`Preparing to delete ${recordsToDelete.length} records from ${tableName}...`);
+      for (let i = 0; i < recordsToDelete.length; i += batchSize) {
+        const batch = recordsToDelete.slice(i, i + batchSize);
+        const rowsToDeletePayload = { "Action": "Delete", "Rows": batch.map(record => ({'Row ID': record['Row ID']})) };
+        _sendPayloadToAppSheet(tableName, rowsToDeletePayload);
+        Logger.log(`Sent delete request for batch of ${batch.length} records from ${tableName}.`);
+        Utilities.sleep(1000); // Pause for 1 second between API calls
+      }
+    };
+    
+    batchDelete(MIGRATION_SOURCE_ESCALATIONS_TABLE, escalationsToDelete);
+    batchDelete(MIGRATION_SOURCE_PAUSES_TABLE, pausesToDelete);
+
+    Logger.log('--- Stray Log Cleanup Completed Successfully ---');
+
+  } catch(e) {
+    Logger.log(`A critical error occurred during the cleanup process: ${e.message}`);
+  }
+}
+
+
+/**
+ * Helper function to append data safely, ensuring column order is preserved and preventing duplicates.
+ */
+function appendData(sheetId, dataToAppend, keyColumn) {
+  if (!dataToAppend || dataToAppend.length === 0) {
+    return; // Nothing to do
+  }
+  
+  const sheet = SpreadsheetApp.openById(sheetId).getSheets()[0];
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const keyIndex = headers.indexOf(keyColumn);
+  if (keyIndex === -1) {
+    Logger.log(`ERROR: Key column "${keyColumn}" not found in sheet ${sheet.getName()}. Cannot check for duplicates.`);
+    return;
+  }
+  
+  let existingIds = new Set();
+  if (sheet.getLastRow() > 1) {
+    existingIds = new Set(sheet.getRange(2, keyIndex + 1, sheet.getLastRow() - 1, 1).getValues().flat().map(String));
+  }
+  
+  const newRecords = dataToAppend.filter(item => !existingIds.has(String(item[keyColumn])));
+
+  if (newRecords.length === 0) {
+    Logger.log(`No new records to append to ${sheet.getName()}. Data already exists.`);
+    return;
+  }
+
+  const rowsToAdd = newRecords.map(item => headers.map(header => item[header] || ''));
+  
+  const batchSize = 500;
+  for (let i = 0; i < rowsToAdd.length; i += batchSize) {
+    const batch = rowsToAdd.slice(i, i + batchSize);
+    sheet.getRange(sheet.getLastRow() + 1, 1, batch.length, headers.length).setValues(batch);
+    Logger.log(`Appended batch of ${batch.length} rows to sheet: ${sheet.getName()}`);
+    SpreadsheetApp.flush();
+  }
+}
+

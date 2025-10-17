@@ -1,0 +1,380 @@
+// ==============================================================================
+// DEFINITIVE REPORT GENERATOR (Surgical Quarantine v2) - v16 (Complete File)
+// This version uses the "Subtract, Don't Re-Filter" method for a reliable and
+// accurate forensic analysis. All functions are included.
+// ==============================================================================
+
+// --- CONFIGURATION ---
+const REPORT_SPREADSHEET_ID = "1csYc8sdg5DudzlGYW0s6RgmcIJfjD3TE4LLNoGfd-Ts";
+const HEADCOUNT = 7;
+
+/**
+ * Main function to generate the report and quarantine abnormal tasks.
+ */
+function generateReportAndQuarantineAbnormalTasks() {
+    const SCRIPT_EXECUTION_TIME = new Date();
+    Logger.log("--- SCRIPT STARTED: generateReportAndQuarantineAbnormalTasks ---");
+
+    try {
+        // --- Step 1: Data Load and Logging ---
+        Logger.log("Step 1: Reading all source CSV files...");
+        const allTasks = readCSV(SUB_TASK_FILE_ID);
+        const allPauses = readCSV(PAUSE_LOGS_FILE_ID);
+        const allEscalations = readCSV(ESCALATION_LOGS_FILE_ID);
+        const logSummary = `Data Load Summary: Found ${allTasks.length} tasks, ${allPauses.length} pauses, and ${allEscalations.length} escalations.`;
+        Logger.log(logSummary);
+
+        if (allTasks.length === 0) {
+            const tempSheet = SpreadsheetApp.openById(REPORT_SPREADSHEET_ID).getSheets()[0];
+            tempSheet.getRange('B10').setValue('No task data found to generate a report.');
+            Logger.log("--- SCRIPT FINISHED: No data ---");
+            return { quarantineUrl: null };
+        }
+
+        // --- Step 2: Expanded Quarantine for ALL Data Sources ---
+        const taskQuarantine = identifyAndQuarantineTasks(allTasks, allPauses, allEscalations);
+        const pauseQuarantine = identifyAndQuarantineLogs(allPauses, "Pause");
+        const escalationQuarantine = identifyAndQuarantineLogs(allEscalations, "Escalation");
+
+        const validTasks = taskQuarantine.validLogs;
+        const validPauses = pauseQuarantine.validLogs;
+        const validEscalations = escalationQuarantine.validLogs;
+
+        let allQuarantinedItems = [...taskQuarantine.quarantinedLogs, ...pauseQuarantine.quarantinedLogs, ...escalationQuarantine.quarantinedLogs];
+        const quarantinedSummary = taskQuarantine.quarantinedLogs.reduce((acc, task) => {
+            const status = task['Status'] || 'Unknown';
+            acc[status] = (acc[status] || 0) + 1;
+            return acc;
+        }, {});
+        Logger.log(`Data validation complete. Quarantined: ${allQuarantinedItems.length} total items. Task Status Breakdown: ${JSON.stringify(quarantinedSummary)}`);
+
+        // --- Step 3: Generate the Main Report ---
+        const spreadsheet = SpreadsheetApp.openById(REPORT_SPREADSHEET_ID);
+        const reportSheet = prepareReportSheet(spreadsheet);
+        
+        const allMonths = getAllMonthsInRange(validTasks);
+        const reportStartDate = new Date(new Date().getFullYear(), 7, 1); // August is month 7
+        const filteredMonthKeys = Object.keys(allMonths).filter(key => {
+            const [year, month] = key.split('-').map(Number);
+            return new Date(year, month, 1) >= reportStartDate;
+        });
+        const sortedMonths = filteredMonthKeys.sort().reverse();
+        
+        let currentRow = 10;
+        reportSheet.getRange(currentRow, 2).setValue(`Report generated at: ${SCRIPT_EXECUTION_TIME.toLocaleString()}`).setFontSize(9).setFontStyle('italic');
+        currentRow += 2;
+
+        for (const monthKey of sortedMonths) {
+            const monthInfo = allMonths[monthKey];
+            const monthName = new Date(monthInfo.year, monthInfo.month).toLocaleString('default', { month: 'long', year: 'numeric' });
+            
+            const broadMonthFilter = { startDate: monthInfo.startDate.toISOString().split('T')[0], endDate: monthInfo.endDate.toISOString().split('T')[0] };
+            const broadDashboardData = getDashboardDataFromCSV(broadMonthFilter);
+            const trueTotalCompleted = broadDashboardData.kpis.totalCases || 0;
+            
+            const monthTableRows = [];
+            const allTaskTypes = getUniqueTaskTypes(validTasks);
+
+            for (const taskType of allTaskTypes) {
+                const specificFilters = { ...broadMonthFilter, taskType: taskType };
+                const dashboardData = getDashboardDataFromCSV(specificFilters);
+                const completedCases = dashboardData.kpis.totalCases || 0;
+                
+                let { productiveHours, contributingTasksWithHours } = calculateReportProductiveHours(specificFilters, validTasks, validPauses, validEscalations);
+                
+                const workDaysInMonth = getWorkDaysInDateRange(monthInfo.startDate, monthInfo.endDate);
+                const availableHours = HEADCOUNT * workDaysInMonth * 8 * (1 - 0.15);
+
+                if (productiveHours > availableHours) {
+                    Logger.log(`FORENSIC ANALYSIS for "${taskType}" in ${monthName}: Productive Hours (${productiveHours.toFixed(2)}) > Available Hours (${availableHours.toFixed(2)}).`);
+                    contributingTasksWithHours.sort((a, b) => b.hours - a.hours);
+                    const topOffenders = contributingTasksWithHours.slice(0, 5);
+                    let hoursToSubtract = 0;
+                    
+                    Logger.log(` -> Top Offenders identified:`);
+                    topOffenders.forEach(offender => {
+                        Logger.log(`  -> Task ${offender.task['Log ID']} contributed ${offender.hours.toFixed(2)} hours.`);
+                        hoursToSubtract += offender.hours;
+                        allQuarantinedItems.push({ 
+                            ...offender.task, 
+                            reason: `Top Offender: contributed ${offender.hours.toFixed(2)}h to abnormal total in ${monthName}`,
+                            logType: 'Task'
+                        });
+                    });
+
+                    productiveHours -= hoursToSubtract;
+                    Logger.log(` -> Offenders' hours subtracted. New Productive Hours for report: ${productiveHours.toFixed(2)}`);
+                }
+                
+                if (completedCases > 0 || productiveHours > 0.01) {
+                    const utilization = availableHours > 0 ? Math.min(1, productiveHours / availableHours) : 0;
+                    const kpiKeyMap = { "Onboarding Qualify": "avgObqAHTMins", "Post OBQ": "avgPostObqAHTMins" };
+                    let ahtKpiKey;
+                    if (kpiKeyMap[taskType]) { ahtKpiKey = kpiKeyMap[taskType]; }
+                    else { const baseType = taskType.replace(/[^a-zA-Z0-9]/g, ''); const capitalizedType = baseType.charAt(0).toUpperCase() + baseType.slice(1); ahtKpiKey = `avg${capitalizedType}AHTMins`; }
+                    monthTableRows.push([taskType, completedCases, HEADCOUNT, availableHours, productiveHours, dashboardData.kpis[ahtKpiKey] || 0, utilization]);
+                }
+            }
+
+            if (monthTableRows.length > 0) {
+                currentRow = writeMonthSectionToSheet(reportSheet, currentRow, monthName, monthTableRows, trueTotalCompleted);
+                currentRow += 3;
+            }
+        }
+
+        let quarantineUrl = null;
+        if (allQuarantinedItems.length > 0) {
+            quarantineUrl = generateQuarantineSheet(allQuarantinedItems, SCRIPT_EXECUTION_TIME);
+        }
+
+        currentRow += 2;
+        reportSheet.getRange(currentRow, 2, 1, 7).merge()
+            .setValue(logSummary)
+            .setFontStyle('italic')
+            .setFontSize(9)
+            .setHorizontalAlignment('left');
+
+        Logger.log(`--- SCRIPT FINISHED SUCCESSFULLY ---`);
+return { quarantineUrl: quarantineUrl }; // Add this return statement
+
+} catch (e) {
+    Logger.log(`--- CRITICAL ERROR in generateReportAndQuarantineAbnormalTasks ---\nError: ${e.message}\nStack: ${e.stack}`);
+    return { quarantineUrl: null }; // Add this return statement for errors
+}
+}
+
+// ============================================================
+// =================== ALL HELPER FUNCTIONS ===================
+// ============================================================
+
+function identifyAndQuarantineTasks(allTasks, allPauses, allEscalations) {
+    const validLogs = [];
+    const quarantinedLogs = [];
+    const now = new Date();
+    const EXCESSIVE_DURATION_HOURS = 720;
+    const STALE_TASK_DAYS = 90;
+    const PRODUCTIVE_HOUR_THRESHOLD = 200;
+
+    const pausesByCase = allPauses.reduce((acc, p) => { (acc[p['Related Case ID']] = acc[p['Related Case ID']] || []).push(p); return acc; }, {});
+    const escalationsByCase = allEscalations.reduce((acc, e) => { (acc[e['Related Case ID']] = acc[e['Related Case ID']] || []).push(e); return acc; }, {});
+
+    allTasks.forEach(task => {
+        const start = dashboard_assistantParseDateString(task['Start Timestamp']);
+        let end = dashboard_assistantParseDateString(task['End Timestamp']);
+        let reason = '';
+
+        if (!start) {
+            reason = 'Task: Invalid or missing Start Timestamp';
+        } else {
+            const effectiveEnd = end || now;
+            
+            if (end && end < start) {
+                reason = 'Task: Negative Duration (End is before Start)';
+            } else if (end && end > now) {
+                reason = 'Task: Future-Dated (End is in the future)';
+            } else if (end && ((end.getTime() - start.getTime()) / 3600000) > EXCESSIVE_DURATION_HOURS) {
+                reason = `Task: Excessively Long Raw Duration (> ${EXCESSIVE_DURATION_HOURS} hours)`;
+            } else if (!end && (now.getTime() - start.getTime()) > (STALE_TASK_DAYS * 24 * 60 * 60 * 1000)) {
+                reason = `Task: Stale In-Progress (> ${STALE_TASK_DAYS} days old)`;
+            } else {
+                const caseId = task['Case ID'];
+                const casePauses = pausesByCase[caseId] || [];
+                const caseEscalations = escalationsByCase[caseId] || [];
+                const productiveMillis = calculateBusinessProductiveMillis(start, effectiveEnd, casePauses, caseEscalations);
+                const productiveHours = productiveMillis / 3600000;
+
+                if (productiveHours > PRODUCTIVE_HOUR_THRESHOLD) {
+                    reason = `Task: Abnormal Productive Hours (${productiveHours.toFixed(2)} hours), exceeds ${PRODUCTIVE_HOUR_THRESHOLD}h threshold.`;
+                }
+            }
+        }
+
+        if (reason) {
+            quarantinedLogs.push({ ...task, reason: reason, logType: 'Task' });
+        } else {
+            validLogs.push(task);
+        }
+    });
+
+    return { validLogs, quarantinedLogs };
+}
+
+
+function identifyAndQuarantineLogs(logs, logType) {
+    const validLogs = [];
+    const quarantinedLogs = [];
+    const now = new Date();
+
+    logs.forEach(log => {
+        const start = dashboard_assistantParseDateString(log[`${logType} Start Time`]);
+        const end = dashboard_assistantParseDateString(log[`${logType} End Time`]);
+        let reason = '';
+
+        if (!start) {
+            reason = `${logType}: Invalid or missing Start Timestamp`;
+        } else if (end && end < start) {
+            reason = `${logType}: Negative Duration (End is before Start)`;
+        } else if (end && end > now) {
+            reason = `${logType}: Future-Dated (End is in the future)`;
+        } else if (!end && (now.getTime() - start.getTime()) > (30 * 24 * 60 * 60 * 1000)) {
+             reason = `${logType}: Stale Log (open for > 30 days)`;
+        }
+
+        if (reason) {
+            quarantinedLogs.push({ ...log, reason: reason, logType: logType });
+        } else {
+            validLogs.push(log);
+        }
+    });
+
+    return { validLogs, quarantinedLogs };
+}
+
+
+function generateQuarantineSheet(quarantinedItems, timestamp) {
+    try {
+        const sheetName = `Quarantine Analysis - ${timestamp.toLocaleString()}`;
+        const ss = SpreadsheetApp.create(sheetName);
+        const sheet = ss.getSheets()[0];
+        
+        const headers = ["Reason", "Log Type", "Case ID", "Log ID", "Status", "Start Timestamp", "End Timestamp", "User"];
+        sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
+        
+        const rows = quarantinedItems.map(item => [
+            item.reason,
+            item.logType,
+            item['Case ID'] || item['Related Case ID'],
+            item['Log ID'],
+            item['Status'] || 'N/A',
+            item['Start Timestamp'] || item['Pause Start Time'] || item['Escalation Start Time'],
+            item['End Timestamp'] || item['Pause End Time'] || item['Escalation End Time'],
+            item['User'] || 'N/A'
+        ]);
+        
+        if(rows.length > 0) {
+          sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
+          sheet.autoResizeColumns(1, headers.length);
+        }
+        Logger.log(`Successfully created Quarantine Analysis sheet. URL: ${ss.getUrl()}`);
+        return ss.getUrl();
+    } catch (e) {
+        Logger.log(`ERROR: Could not create Quarantine Analysis sheet. ${e.message}`);
+        return null;
+    }
+}
+
+
+function calculateReportProductiveHours(filters, allTasks, allPauses, allEscalations) {
+    let totalProductiveMillis = 0;
+    const contributingTasksWithHours = [];
+    const periodStart = new Date(filters.startDate);
+    const periodEnd = new Date(filters.endDate);
+    periodEnd.setHours(23, 59, 59, 999);
+    const now = new Date();
+    const pausesByCase = allPauses.reduce((acc, p) => { (acc[p['Related Case ID']] = acc[p['Related Case ID']] || []).push(p); return acc; }, {});
+    const escalationsByCase = allEscalations.reduce((acc, e) => { (acc[e['Related Case ID']] = acc[e['Related Case ID']] || []).push(e); return acc; }, {});
+
+    const relevantTasks = allTasks.filter(task => {
+        if (task['Task type'] !== filters.taskType) return false;
+        const taskStart = dashboard_assistantParseDateString(task['Start Timestamp']);
+        const taskEnd = dashboard_assistantParseDateString(task['End Timestamp']);
+        return taskStart && taskStart < periodEnd && (!taskEnd || taskEnd > periodStart);
+    });
+
+    relevantTasks.forEach(task => {
+        const taskStart = dashboard_assistantParseDateString(task['Start Timestamp']);
+        let taskEnd = dashboard_assistantParseDateString(task['End Timestamp']);
+        const effectiveStart = new Date(Math.max(taskStart.getTime(), periodStart.getTime()));
+        let effectiveEnd;
+        if (taskEnd && taskEnd < periodEnd) {
+            effectiveEnd = taskEnd;
+        } else {
+            effectiveEnd = new Date(Math.min(periodEnd.getTime(), now.getTime()));
+        }
+        if (effectiveStart >= effectiveEnd) return;
+        const caseId = task['Case ID'];
+        const casePauses = pausesByCase[caseId] || [];
+        const caseEscalations = escalationsByCase[caseId] || [];
+        const millisForThisTask = calculateBusinessProductiveMillis(effectiveStart, effectiveEnd, casePauses, caseEscalations);
+        if (millisForThisTask > 0) {
+            totalProductiveMillis += millisForThisTask;
+            contributingTasksWithHours.push({ task: task, hours: millisForThisTask / 3600000 });
+        }
+    });
+    return {
+        productiveHours: totalProductiveMillis / 3600000,
+        contributingTasksWithHours: contributingTasksWithHours
+    };
+}
+
+
+function writeMonthSectionToSheet(sheet, startRow, monthName, tableRows, trueTotalCompleted) {
+    let currentRow = startRow;
+    sheet.getRange(currentRow, 2, 1, 10).merge().setValue(`Performance Report - ${monthName}`)
+        .setFontSize(16).setFontWeight('bold').setHorizontalAlignment('left').setFontColor('#00B14F');
+    currentRow += 2;
+    const totalProductiveHours = tableRows.reduce((sum, row) => sum + row[4], 0);
+    const totalAvailableHours = tableRows.length > 0 ? tableRows[0][3] : 0;
+    const overallUtilization = totalAvailableHours > 0 ? totalProductiveHours / totalAvailableHours : 0;
+    const kpiData = [
+        ["Total Completed Cases", trueTotalCompleted, "Overall Utilization", overallUtilization],
+        ["Total Productive Hours", totalProductiveHours, "Total Available Hours", totalAvailableHours]
+    ];
+    sheet.getRange(currentRow, 2, kpiData.length, 4).setValues(kpiData).setFontFamily('Inter');
+    sheet.getRange(currentRow, 3).setNumberFormat('0');
+    sheet.getRange(currentRow, 5).setNumberFormat('0.0%');
+    sheet.getRange(currentRow + 1, 3).setNumberFormat('#,##0.00');
+    sheet.getRange(currentRow + 1, 5).setNumberFormat('#,##0.00');
+    sheet.getRange(currentRow, 2, kpiData.length, 1).setFontWeight('bold');
+    sheet.getRange(currentRow, 4, kpiData.length, 1).setFontWeight('bold');
+    currentRow += kpiData.length + 2;
+    const tableHeaders = ["Task Type", "Completed Cases", "Headcount", "Available Hours", "Productive Hours", "Avg AHT ( Mins )", "Utilization"];
+    sheet.getRange(currentRow, 2, 1, tableHeaders.length).setValues([tableHeaders]).setBackground('#f3f3f3').setFontWeight('bold').setHorizontalAlignment('center');
+    currentRow++;
+    const tableRange = sheet.getRange(currentRow, 2, tableRows.length, tableHeaders.length);
+    tableRange.setValues(tableRows).setHorizontalAlignment('center');
+    sheet.getRange(currentRow, 2, tableRows.length, 1).setHorizontalAlignment('left');
+    sheet.getRange(currentRow, 3, tableRows.length, 2).setNumberFormat('0');
+    sheet.getRange(currentRow, 5, tableRows.length, 3).setNumberFormat('0.00');
+    sheet.getRange(currentRow, 8, tableRows.length, 1).setNumberFormat('0.0%');
+    currentRow += tableRows.length;
+    sheet.autoResizeColumns(2, tableHeaders.length);
+    return currentRow;
+}
+
+
+function prepareReportSheet(spreadsheet) {
+    const sheet = spreadsheet.getSheets()[0];
+    sheet.setName('Monthly Performance Report');
+    sheet.getRange('A10:Z').clear(); 
+    sheet.getRange('A10:Z').setBackground('#F0F8F5').setFontFamily('Inter');
+    return sheet;
+}
+
+
+function getUniqueTaskTypes(allTasks) {
+    const taskTypes = new Set(allTasks.map(t => t['Task type']).filter(Boolean));
+    return Array.from(taskTypes).sort();
+}
+
+
+function getAllMonthsInRange(allTasks) {
+    const months = {};
+    allTasks.forEach(task => {
+        const taskDate = dashboard_assistantParseDateString(task['Start Timestamp']);
+        if (taskDate) {
+            const year = taskDate.getFullYear();
+            const month = taskDate.getMonth();
+            const key = `${year}-${String(month).padStart(2, '0')}`;
+            if (!months[key]) {
+                months[key] = {
+                    year: year,
+                    month: month,
+                    startDate: new Date(year, month, 1),
+                    endDate: new Date(year, month + 1, 0, 23, 59, 59, 999)
+                };
+            }
+        }
+    });
+    return months;
+}

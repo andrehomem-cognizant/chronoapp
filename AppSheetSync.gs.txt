@@ -1,0 +1,221 @@
+// =================================================================
+// APPSHEET SYNC CONFIGURATION
+// =================================================================
+
+// --- 1. FILL IN YOUR APPSHEET DETAILS ---
+const APPSHEET_APP_ID = '4aa55d43-eb21-42a6-8887-d623aceb2c19'; 
+const APPSHEET_ACCESS_KEY = 'V2-D3drx-F9rO3-SWuZu-9lW13-wzayV-V8x5s-36FzF-Qm3aW';
+
+// --- 2. FILL IN YOUR GOOGLE SHEET SOURCE IDs ---
+const SOURCE_SUB_TASK_SHEET_ID = '1gzrZEqUoVe9B8CfdBX7hdDuod_TdTWL2pQnbsgTwz88';
+const SOURCE_ESCALATION_SHEET_ID = '1WDTVxCZowgsn7d3A1jQkR-7IuJzKxfK621pVg_HUOe4';
+const SOURCE_PAUSE_SHEET_ID = '1Yfql1AAIFah0pKIiFN4vioKxOdjVeS-pPrERAnzf9JI';
+
+// --- 3. VERIFY YOUR WEB APP's CSV FILE IDs (from code.gs) ---
+const DEST_SUB_TASK_FILE_ID = "1EPme5e14agnNBm80Kx7BEOWjfPtDOELr";
+const DEST_ESCALATION_LOGS_FILE_ID = "17WwXrYSUFYAiAsbSi6nCfgjOp_MNTb5v";
+const DEST_PAUSE_LOGS_FILE_ID = "1ksGOgIXi4VVsN0QG-c-yBQLGAUmVyt2y";
+
+// --- 4. COLUMN MAPPING (Source Column Name -> Destination CSV Header Name) ---
+const CASE_COLUMN_MAP = {
+  'Onboarding Done': 'OnBoarding Done Timestamp',
+  'Asset Delivery Date': 'Asset Delivered Timestamp',
+  'Asset Trigger Date': 'Asset Triggered Timestamp',
+  'Log id': 'Log ID'
+};
+
+const ESCALATION_COLUMN_MAP = { 'Log id': 'Log ID' };
+const PAUSE_COLUMN_MAP = { 'Log id': 'Log ID' };
+
+
+// =================================================================
+// ===== HELPER & UTILITY FUNCTIONS ================================
+// =================================================================
+
+function _normalizeDataArray(items, columnMap) {
+  if (!items) return [];
+  return items.map(item => {
+    const newItem = {};
+    for (const key in item) {
+      const destKey = columnMap[key] || key;
+      newItem[destKey] = item[key];
+    }
+    return newItem;
+  });
+}
+
+
+
+
+
+// CHANGE 1: THE `writeCSVWithHeaders` FUNCTION IS NO LONGER NEEDED AND HAS BEEN REMOVED.
+// We will use the new, safe `writeCSV` function from code.gs everywhere.
+
+
+// =================================================================
+// ===== NEW DIAGNOSTIC, RESET AND AUDIT FUNCTIONS =================
+// =================================================================
+
+
+
+
+/**
+ * Use this definitive reset function to make your CSVs a perfect mirror of your app data.
+ * It combines active data from Sheets and completed data from AppSheet DB and overwrites the CSVs.
+ */
+function definitivelyResetCsvs() {
+  Logger.log("--- Starting DEFINITIVE One-Way Sync from AppSheet/Sheets to CSVs ---");
+  try {
+    // 1. Explicitly clear destination CSVs
+    Logger.log("Step 1: Explicitly clearing all destination CSV files...");
+    DriveApp.getFileById(DEST_SUB_TASK_FILE_ID).setContent("");
+    DriveApp.getFileById(DEST_ESCALATION_LOGS_FILE_ID).setContent("");
+    DriveApp.getFileById(DEST_PAUSE_LOGS_FILE_ID).setContent("");
+    Logger.log(" -> Destination CSVs have been cleared.");
+
+    // 2. Fetch and Normalize all data sources
+    Logger.log("Step 2: Fetching and normalizing data...");
+    const activeTasks = _normalizeDataArray(fetchFromGoogleSheet_(SOURCE_SUB_TASK_SHEET_ID), CASE_COLUMN_MAP);
+    const activeEscalations = _normalizeDataArray(fetchFromGoogleSheet_(SOURCE_ESCALATION_SHEET_ID), ESCALATION_COLUMN_MAP);
+    const activePauses = _normalizeDataArray(fetchFromGoogleSheet_(SOURCE_PAUSE_SHEET_ID), PAUSE_COLUMN_MAP);
+    
+    const completedTasks = _normalizeDataArray(fetchFromAppSheetAPI_('Completed_Cases'), CASE_COLUMN_MAP);
+    const completedEscalations = _normalizeDataArray(fetchFromAppSheetAPI_('Completed_Escalation_Logs'), ESCALATION_COLUMN_MAP);
+    const completedPauses = _normalizeDataArray(fetchFromAppSheetAPI_('Completed_Pause_Logs'), PAUSE_COLUMN_MAP);
+
+    // 3. Combine datasets
+    Logger.log("Step 3: Combining datasets...");
+    const finalTasks = activeTasks.concat(completedTasks);
+    const finalEscalations = activeEscalations.concat(completedEscalations);
+    const finalPauses = activePauses.concat(completedPauses);
+    
+    // 5. Overwrite the now-empty CSVs using the master header list
+    Logger.log("Step 5: Writing new, complete source of truth to destination CSVs...");
+
+    // CHANGE 3: Use the safe `writeCSV` from code.gs with the MASTER HEADERS. This is the most critical fix.
+    writeCSV(DEST_SUB_TASK_FILE_ID, finalTasks, SUB_TASK_HEADERS);
+
+    // Note: These are still potentially unsafe as we have not defined master headers for them.
+    writeCSV(DEST_ESCALATION_LOGS_FILE_ID, finalEscalations);
+    writeCSV(DEST_PAUSE_LOGS_FILE_ID, finalPauses);
+
+    Logger.log("--- DEFINITIVE One-Way Sync to CSVs Complete. Your CSVs are now a perfect mirror. ---");
+
+  } catch (e) {
+    Logger.log(`CRITICAL ERROR during definitivelyResetCsvs: ${e.message}`);
+  }
+}
+
+
+
+
+
+/**
+ * NEW: Provides a full audit of record counts across all 9 data sources.
+ * RUN THIS to get a clear, high-level overview of the state of your data.
+ */
+function runFullDataAudit() {
+  Logger.log("--- Starting Full Data Source Audit ---");
+  try {
+    // 1. Fetch from Google Sheets (Active Data)
+    Logger.log("--- 1. Google Sheets (Active Data) ---");
+    const sheetTasks = fetchFromGoogleSheet_(SOURCE_SUB_TASK_SHEET_ID);
+    const sheetEscalations = fetchFromGoogleSheet_(SOURCE_ESCALATION_SHEET_ID);
+    const sheetPauses = fetchFromGoogleSheet_(SOURCE_PAUSE_SHEET_ID);
+    Logger.log(` -> Google Sheet - Sub Tasks: ${sheetTasks.length} records`);
+    Logger.log(` -> Google Sheet - Escalations: ${sheetEscalations.length} records`);
+    Logger.log(` -> Google Sheet - Pauses: ${sheetPauses.length} records`);
+
+    // 2. Fetch from AppSheet Database (Completed/Archived Data)
+    Logger.log("\n--- 2. AppSheet Database (Completed Data) ---");
+    const dbTasks = fetchFromAppSheetAPI_('Completed_Cases');
+    const dbEscalations = fetchFromAppSheetAPI_('Completed_Escalation_Logs');
+    const dbPauses = fetchFromAppSheetAPI_('Completed_Pause_Logs');
+    Logger.log(` -> AppSheet DB - Completed_Cases: ${dbTasks.length} records`);
+    Logger.log(` -> AppSheet DB - Completed_Escalation_Logs: ${dbEscalations.length} records`);
+    Logger.log(` -> AppSheet DB - Completed_Pause_Logs: ${dbPauses.length} records`);
+
+    // 3. Read from Destination CSVs (Final Truth)
+    Logger.log("\n--- 3. Destination CSVs (Final Source of Truth) ---");
+    const csvTasks = readCSV(DEST_SUB_TASK_FILE_ID);
+    const csvEscalations = readCSV(DEST_ESCALATION_LOGS_FILE_ID);
+    const csvPauses = readCSV(DEST_PAUSE_LOGS_FILE_ID);
+    Logger.log(` -> CSV - Sub Tasks: ${csvTasks.length} records`);
+    Logger.log(` -> CSV - Escalations: ${csvEscalations.length} records`);
+    Logger.log(` -> CSV - Pauses: ${csvPauses.length} records`);
+
+  } catch(e) {
+    Logger.log(`An error occurred during the audit: ${e.message}`);
+  }
+  Logger.log("\n--- Full Data Source Audit Complete ---");
+}
+
+
+/**
+ * NEW: Clears all content from the destination CSV files and verifies they are empty.
+ * RUN THIS to prepare for a fresh data import.
+ */
+function clearAllCsvs() {
+  Logger.log("--- Starting CSV Clear Operation ---");
+  try {
+    // 1. Clear all three destination CSVs
+    Logger.log("Step 1: Clearing content from destination CSV files...");
+    DriveApp.getFileById(DEST_SUB_TASK_FILE_ID).setContent("");
+    DriveApp.getFileById(DEST_ESCALATION_LOGS_FILE_ID).setContent("");
+    DriveApp.getFileById(DEST_PAUSE_LOGS_FILE_ID).setContent("");
+    Logger.log(" -> All CSV files have been cleared.");
+
+    // 2. Verify by reading the files back and logging their counts
+    Logger.log("\nStep 2: Verifying CSV files are empty...");
+    const csvTasks = readCSV(DEST_SUB_TASK_FILE_ID);
+    const csvEscalations = readCSV(DEST_ESCALATION_LOGS_FILE_ID);
+    const csvPauses = readCSV(DEST_PAUSE_LOGS_FILE_ID);
+    
+    Logger.log("\n--- VERIFICATION COUNT ---");
+    Logger.log(` -> CSV - Sub Tasks now has: ${csvTasks.length} records`);
+    Logger.log(` -> CSV - Escalations now has: ${csvEscalations.length} records`);
+    Logger.log(` -> CSV - Pauses now has: ${csvPauses.length} records`);
+
+  } catch (e) {
+    Logger.log(`CRITICAL ERROR during clearAllCsvs: ${e.message}`);
+  }
+  Logger.log("\n--- CSV Clear Operation Complete ---");
+}
+
+
+
+/**
+ * A powerful diagnostic tool that asks the AppSheet API to describe a table's structure (its "schema").
+ * This will reveal any hidden, duplicate, or conflicting column definitions.
+ */
+function getAppSheetTableSchema() {
+  const tableNameToDiagnose = 'Completed_Pause_Logs'; // The problematic table
+  Logger.log(`--- Requesting Schema for table: ${tableNameToDiagnose} ---`);
+
+  const apiUrl = `https://api.appsheet.com/api/v2/apps/${APPSHEET_APP_ID}/tables/${tableNameToDiagnose}`;
+  const options = {
+    'method': 'get', // We use GET to request the table's definition
+    'contentType': 'application/json',
+    'headers': { 'ApplicationAccessKey': APPSHEET_ACCESS_KEY },
+    'muteHttpExceptions': true
+  };
+  
+  try {
+    const response = UrlFetchApp.fetch(apiUrl, options);
+    const responseCode = response.getResponseCode();
+    const responseText = response.getContentText();
+
+    if (responseCode === 200) {
+      Logger.log("SUCCESS: Received table schema from AppSheet API.");
+      Logger.log("--- SCHEMA START ---");
+      // Use JSON.stringify to format the output for readability
+      Logger.log(JSON.stringify(JSON.parse(responseText), null, 2));
+      Logger.log("--- SCHEMA END ---");
+    } else {
+      Logger.log(`FAILED to get table schema. Response Code: ${responseCode}`);
+      Logger.log(`Response Body: ${responseText}`);
+    }
+  } catch (e) {
+    Logger.log(`CRITICAL ERROR during schema fetch: ${e.message}`);
+  }
+}

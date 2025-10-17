@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+      /* You can copy some base styles from Index.html here if needed, or link to a stylesheet */
+      body { background-color: #F0F8F5; font-family: 'Inter', sans-serif; }
+      .card { border-radius: 12px; }
+      .scorecard { text-align: center; }
+      .scorecard .value { font-size: 2.5rem; font-weight: 700; }
+      .scorecard .label { font-weight: 600; color: #6B7280; }
+    </style>
+  </head>
+  <body>
+    <div class="container-fluid p-4">
+      <nav class="nav nav-pills border-bottom mb-4">
+        <a id="my-tasks-btn-audit" class="nav-link" href="#">My Tasks</a>
+        <a id="all-tasks-btn-audit" class="nav-link" href="#" style="display: none;">All Tasks</a>
+        <a id="dashboard-btn-audit" class="nav-link" href="#" style="display: none;">Dashboard</a>
+        <a id="settings-btn-audit" class="nav-link" href="#" style="display: none;">Settings</a>
+        <a id="audit-log-btn-audit" class="nav-link active" href="#">Audit Log</a>
+      </nav>
+
+      <h2>App Health & Activity</h2>
+      <div class="row mt-4">
+        <div class="col-md-3 mb-4"><div class="card"><div class="card-body scorecard"><div class="value" id="actionsToday">--</div><div class="label">Actions Today</div></div></div></div>
+        <div class="col-md-3 mb-4"><div class="card"><div class="card-body scorecard"><div class="value" id="actionsThisMonth">--</div><div class="label">Actions This Month</div></div></div></div>
+        <div class="col-md-2 mb-4"><div class="card"><div class="card-body scorecard"><div class="value" id="totalTasks">--</div><div class="label">Total Tasks</div></div></div></div>
+        <div class="col-md-2 mb-4"><div class="card"><div class="card-body scorecard"><div class="value" id="totalEscalations">--</div><div class="label">Escalations</div></div></div></div>
+        <div class="col-md-2 mb-4"><div class="card"><div class="card-body scorecard"><div class="value" id="totalPauses">--</div><div class="label">Pauses</div></div></div></div>
+        <div class="col-md-6 mb-4"><div class="card"><div class="card-body"><div class="label">Last Data Sync</div><div id="lastSync">--</div></div></div></div>
+        <div class="col-md-6 mb-4"><div class="card"><div class="card-body"><div class="label">Last Backup</div><div id="lastBackup">--</div></div></div></div>
+      </div>
+
+      <h2 class="mt-4">Detailed Activity Log</h2>
+      <div class="card mt-3">
+        <div class="card-body">
+            <input type="text" id="logSearch" class="form-control mb-3" placeholder="Search logs...">
+            <div style="max-height: 500px; overflow-y: auto;">
+                <table class="table table-sm">
+                    <thead><tr><th>Timestamp</th><th>User</th><th>Action</th><th>Target</th><th>Details</th></tr></thead>
+                    <tbody id="log-table-body">
+                        <tr><td colspan="5" class="text-center">Loading logs...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+      </div>
+
+    </div>
+
+    <script>
+    let fullLogData = [];
+
+    document.addEventListener("DOMContentLoaded", function() {
+        // --- CORRECTED LOGIC: Make three separate, clean calls to the backend ---
+
+        // Call #1: Get the Web App URL to build navigation links
+        google.script.run.withSuccessHandler(url => {
+            if (url) {
+                document.getElementById('my-tasks-btn-audit').href = url;
+                document.getElementById('all-tasks-btn-audit').href = url;
+                document.getElementById('dashboard-btn-audit').href = url + '?page=dashboard';
+                document.getElementById('settings-btn-audit').href = url; // This link will be handled by the main Index.html JS
+            }
+        }).getWebAppUrl();
+
+        // Call #2: Get user role to show/hide nav links
+        google.script.run.withSuccessHandler(context => {
+            if (context && context.role) {
+                const isAdmin = context.role === 'Admin' || context.role === 'Super Admin';
+                document.getElementById('all-tasks-btn-audit').style.display = isAdmin ? 'inline-block' : 'none';
+                document.getElementById('dashboard-btn-audit').style.display = isAdmin ? 'inline-block' : 'none';
+                document.getElementById('settings-btn-audit').style.display = context.role === 'Super Admin' ? 'inline-block' : 'none';
+            }
+        }).getAppContext();
+
+        // Call #3: Fetch all audit data for the page
+        google.script.run.withSuccessHandler(response => {
+            if (response && response.success) {
+                // Populate Scorecards
+                const sc = response.scorecards;
+                document.getElementById('actionsToday').textContent = sc.actionsToday;
+                document.getElementById('actionsThisMonth').textContent = sc.actionsThisMonth;
+                document.getElementById('totalTasks').textContent = sc.totalTasks;
+                document.getElementById('totalEscalations').textContent = sc.totalEscalations;
+                document.getElementById('totalPauses').textContent = sc.totalPauses;
+                document.getElementById('lastSync').textContent = sc.lastSync;
+                document.getElementById('lastBackup').textContent = sc.lastBackup;
+
+                // Populate Table
+                fullLogData = response.logs;
+                renderLogTable(fullLogData);
+            } else if (response) {
+                alert(response.message);
+            }
+        }).getAuditData();
+
+        // Add event listener for the search box
+        document.getElementById('logSearch').addEventListener('keyup', function(event) {
+            const searchTerm = event.target.value.toLowerCase();
+            if (!fullLogData) return;
+            const filteredLogs = fullLogData.filter(log => {
+                return Object.values(log).some(val => String(val).toLowerCase().includes(searchTerm));
+            });
+            renderLogTable(filteredLogs);
+        });
+    });
+
+    function renderLogTable(logs) {
+        const tbody = document.getElementById('log-table-body');
+        if (!logs || logs.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center">No logs found.</td></tr>';
+            return;
+        }
+        let tableHtml = '';
+        logs.forEach(log => {
+            const formattedDate = new Date(log.timestamp).toLocaleString();
+            // Use Case ID if available, otherwise fall back to Target ID
+            const targetDisplay = log.caseId !== 'N/A' ? log.caseId : log.targetId;
+            tableHtml += `<tr>
+                <td>${formattedDate}</td>
+                <td>${log.user}</td>
+                <td>${log.action}</td>
+                <td>${targetDisplay}</td>
+                <td>${log.details}</td>
+            </tr>`;
+        });
+        tbody.innerHTML = tableHtml;
+    }
+</script>
+  </body>
+</html>

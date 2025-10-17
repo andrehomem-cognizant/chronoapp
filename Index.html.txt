@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <base target="_top">
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    
+    <style>
+      :root {
+          --bg-main: #F0F8F5;
+          --bg-card: #FFFFFF;
+          --accent-primary: #00B14F;
+          --text-primary: #111827;
+          --text-secondary: #6B7280;
+          --border-color: #E5E7EB;
+          --error-color: #EF4444;
+          --shadow-color: rgba(0, 0, 0, 0.05);
+          --hover-secondary: #e6f7ee;
+          --accent-secondary-blue: #E0F2FE;
+          --text-blue: #0284C7;
+          /* Colors for Action Buttons */
+          --orange-color: #F59E0B;
+          --purple-color: #8B5CF6;
+          --blue-color-light: #3B82F6;
+          --blue-color-dark: #2563EB;
+      }
+
+      body { background-color: var(--bg-main); font-family: 'Inter', sans-serif; font-size: 15px; line-height: 1.6; color: var(--text-primary); font-weight: 400; }
+      .container-fluid { padding: 30px; }
+      h2, h5 { font-weight: 700; color: var(--text-primary); }
+      #view-title { font-weight: 800; }
+      
+      .nav-pills { border-bottom: 1px solid var(--border-color); margin-bottom: 30px !important; }
+      .nav-pills .nav-link { background-color: transparent !important; color: var(--text-secondary) !important; border-radius: 0 !important; font-weight: 600; padding: 10px 0; margin-right: 30px; border-bottom: 2px solid transparent; transition: color 0.2s ease, border-color 0.2s ease; }
+      .nav-pills .nav-link:hover { color: var(--text-primary) !important; }
+      .nav-pills .nav-link.active { color: var(--accent-primary) !important; border-bottom: 2px solid var(--accent-primary); }
+
+      .card { background-color: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; box-shadow: 0 4px 6px -1px var(--shadow-color), 0 2px 4px -2px var(--shadow-color); margin-bottom: 20px !important; }
+      .card-header { background-color: var(--bg-card); border-bottom: 1px solid var(--border-color); padding: 25px; font-weight: 700; border-top-left-radius: 12px; border-top-right-radius: 12px; }
+      .card-body { padding: 25px; }
+      .list-group-item { background-color: var(--bg-main); border-color: var(--border-color); padding: 20px 25px; }
+      .card-footer { background-color: var(--bg-main) !important; border-top: 1px solid var(--border-color); border-bottom-left-radius: 12px; border-bottom-right-radius: 12px;}
+
+      .btn { border-radius: 8px; font-weight: 600; padding: 10px 20px; transition: all 0.2s ease-in-out; display: inline-flex; align-items: center; justify-content: center; }
+      .btn svg, .btn .fas { margin-right: 8px; }
+      .btn-primary { background-color: var(--accent-primary); border-color: var(--accent-primary); color: #FFFFFF; }
+      .btn-primary:hover { background-color: #009a44; }
+      .btn-secondary { background-color: transparent; border: 1px solid var(--accent-primary); color: var(--accent-primary) !important; }
+      .btn-secondary:hover { background-color: var(--hover-secondary); }
+      .btn-danger { background-color: var(--error-color); border-color: var(--error-color); color: #FFFFFF; }
+      .btn-danger:hover { background-color: #dc2626; }
+      .btn-light { background-color: #E5E7EB; border-color: #E5E7EB; color: var(--text-primary); }
+      .btn-light:hover { background-color: #d1d5db; }
+      
+      .btn-end-task { background-color: var(--text-secondary); border-color: var(--text-secondary); color: #FFFFFF; }
+      .btn-end-task:hover { background-color: #5a616d; }
+      .btn-asset-triggered { background-color: #66bb6a; border-color: #66bb6a; color: #FFFFFF; }
+      .btn-asset-triggered:hover { background-color: #57a05a; }
+      .btn-asset-delivered { background-color: #4caf50; border-color: #4caf50; color: #FFFFFF; }
+      .btn-asset-delivered:hover { background-color: #43a047; }
+      .btn-onboarding-done { background-color: #388e3c; border-color: #388e3c; color: #FFFFFF; }
+      .btn-onboarding-done:hover { background-color: #2e7d32; }
+      .btn-start-escalation { background-color: var(--orange-color); border-color: var(--orange-color); color: var(--text-primary);}
+      .btn-start-escalation:hover { background-color: #D97706; }
+      .btn-stop-escalation { background-color: var(--purple-color); border-color: var(--purple-color); color: #FFFFFF;}
+      .btn-stop-escalation:hover { background-color: #7C3AED; }
+      .btn-start-pause { background-color: var(--blue-color-light); border-color: var(--blue-color-light); color: #FFFFFF;}
+      .btn-start-pause:hover { background-color: var(--blue-color-dark); }
+      .btn-stop-pause { background-color: var(--blue-color-dark); border-color: var(--blue-color-dark); color: #FFFFFF;}
+      .btn-stop-pause:hover { background-color: #1D4ED8; }
+
+      .form-control, .form-control-file { background-color: var(--bg-main); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; color: var(--text-primary); font-weight: 400; }
+      .form-control:focus { background-color: var(--bg-main); color: var(--text-primary); border-color: var(--accent-primary); box-shadow: 0 0 0 2px rgba(0, 177, 79, 0.2); }
+      label { font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; font-size: 14px; }
+
+      .table { background-color: transparent; color: var(--text-primary); }
+      .table thead th { border-bottom: 1px solid var(--text-primary); border-top: none; font-weight: 700; color: var(--text-primary); }
+      .table td, .table th { border-top: 1px solid var(--border-color); vertical-align: middle; }
+      .table tbody tr:first-child td { border-top: none; }
+
+      .modal-content { background-color: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; }
+      .modal-header, .modal-footer { background-color: var(--bg-main); border-color: var(--border-color); }
+      .close { color: var(--text-primary); }
+
+      .pagination .page-link { background-color: var(--bg-card); border-color: var(--border-color); color: var(--text-secondary); border-radius: 8px; margin: 0 2px;}
+      .pagination .page-item.disabled .page-link { background-color: var(--bg-main); }
+      .pagination .page-item.active .page-link { background-color: var(--accent-primary); border-color: var(--accent-primary); }
+      .page-link:hover { background-color: var(--border-color); }
+
+      .badge-primary { background-color: var(--accent-secondary-blue); color: var(--text-blue); font-weight: 600; padding: 8px 12px; font-size: 15px; }
+      .timestamp-field .edit-mode { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+    <nav class="nav nav-pills">
+    <a id="my-tasks-btn" class="nav-link" href="#" onclick="loadMyTasks(); return false;">My Tasks</a>
+    <a id="all-tasks-btn" class="nav-link" href="#" onclick="loadAllTasks(); return false;" style="display: none;">All Tasks</a>
+    <a id="dashboard-btn" class="nav-link" href="#" style="display: none;">Dashboard</a>
+    <a id="settings-btn" class="nav-link" href="#" onclick="loadSettings(); return false;" style="display: none;">Settings</a>
+    <div id="version-update-container" style="margin-left: auto;"></div>
+</nav>
+    
+    <div id="tasks-view" class="view" style="margin-top: 30px;">
+        <div class="d-flex justify-content-between align-items-center">
+            <h2 id="view-title">My Tasks</h2>
+            <button class="btn btn-primary" data-toggle="modal" data-target="#newTaskModal"><svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clip-rule="evenodd"></path></svg>Add New Task</button>
+        </div>
+        
+        <div id="my-tasks-controls" style="margin-top:20px;">
+    <div class="card" style="padding:15px 25px 5px 25px;">
+        <div class="form-row align-items-end">
+            <div class="col-md-4 form-group">
+                <label for="myTasksStatusFilter">Filter by Status</label>
+                <select id="myTasksStatusFilter" class="form-control">
+                    <option>All</option>
+                    <option>InProgress</option>
+                    <option>Escalated</option>
+                    <option>Paused</option>
+                    <option>Completed</option>
+                </select>
+            </div>
+            <div class="col-md-4 form-group">
+                <label for="myTasksTaskTypeFilter">Filter by Task Type</label>
+                <select id="myTasksTaskTypeFilter" class="form-control">
+                    <option>All</option>
+                    </select>
+            </div>
+        </div>
+    </div>
+</div>
+
+        <div id="admin-controls" style="display: none; margin-top:20px;">
+            <div class="card" style="padding:15px 25px 5px 25px;">
+                <div class="form-row align-items-end">
+                    <div class="col-md-3 form-group"><label for="searchInput">Search by Case ID</label><input type="text" id="searchInput" class="form-control" placeholder="Enter Case ID..."></div>
+                    <div class="col-md-3 form-group"><label for="statusFilter">Filter by Status</label><select id="statusFilter" class="form-control"><option>All</option><option>InProgress</option><option>Completed</option><option>Escalated</option><option>Paused</option></select></div>
+                    <div class="col-md-3 form-group"><label for="taskTypeFilter">Filter by Task Type</label><select id="taskTypeFilter" class="form-control"><option>All</option><option>Onboarding Qualify</option><option>Admin Creation</option><option>Menu Creation</option><option>Asset Delivery</option><option>Integration</option><option>Post OBQ</option></select></div>
+                    <div class="col-md-3 form-group d-flex justify-content-end"><nav id="pagination-nav"></nav></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="tasks-container" style="margin-top: 30px;"></div>
+    </div>
+
+
+        <div id="settings-view" class="view" style="display: none; margin-top: 30px;">
+          <!-- ADD THIS ENTIRE CARD AT THE TOP OF YOUR SETTINGS VIEW -->
+<div class="card">
+    <div class="card-body">
+        <h2>Full Data Export</h2>
+        <p class="text-secondary">Click the button to generate a new Google Sheet containing a complete, raw export of all data from the internal CSV files. This includes all user data.</p>
+        <button id="extractDataBtn" class="btn btn-primary" onclick="handleExtractAllData()">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+              <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
+              <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L6.354 8.146a.5.5 0 1 0-.708.708l2 2z"/>
+            </svg>
+            Extract all Data
+        </button>
+        <div id="extract-status" class="mt-3"></div>
+    </div>
+</div>
+    <div class="card">
+        <div class="card-body">
+            <h2>User Management</h2>
+            <div class="row" style="margin-top: 20px;">
+                <div class="col-md-7">
+                    <h5>Existing Users</h5>
+                    <div id="users-table-container"></div>
+                </div>
+                <div class="col-md-5">
+                    <h5>Add / Update User</h5>
+                    <form id="userForm">
+                        <div class="form-group"><label>User Email</label><input type="email" class="form-control" id="userEmail" required></div>
+                        <div class="form-group"><label>Role</label><select class="form-control" id="userRole" required></select></div>
+                        <button type="button" class="btn btn-primary" onclick="handleSaveUser()"><svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path d="M7.5 2.5a.5.5 0 00-1 0v1.5H4a.5.5 0 000 1h2.5V14a.5.5 0 00.5.5h5a.5.5 0 00.5-.5V8.803a.5.5 0 00-.275-.447l-3.5-2A.5.5 0 0010 6.5v.512a.5.5 0 00.5.5h.5a.5.5 0 00.5-.5V6.5a1.5 1.5 0 011.225-1.447l3.5-2A1.5 1.5 0 0117 4.197V14.5a1.5 1.5 0 01-1.5 1.5h-5A1.5 1.5 0 019 14.5V4a.5.5 0 00-.5-.5H7.5V2.5z"></path></svg>Save User</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="card" style="margin-top: 30px;">
+        <div class="card-body">
+            <h2>Bulk Data Import</h2>
+            <p class="text-secondary">Select the data type, choose the corresponding CSV file, and click import.</p>
+            <div class="form-group"><label>1. Select Data Type</label><select class="form-control" id="importDataType"><option value="tasks">Tasks</option><option value="escalations">Escalation Logs</option><option value="pauses">Pause Logs</option></select></div>
+            <div class="form-group"><label>2. Select CSV file to import</label><input type="file" class="form-control-file" id="csvUploader" accept=".csv"></div>
+            <button type="button" class="btn btn-primary" onclick="handleCsvUpload()">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+                    <path d="M8 6.5a.5.5 0 0 1 .5.5v5.793l2.146-2.147a.5.5 0 0 1 .708.708l-3 3a.5.5 0 0 1-.708 0l-3-3a.5.5 0 1 1 .708-.708L7.5 12.793V7a.5.5 0 0 1 .5-.5z"/>
+                    <path d="M14 14V4.5L9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2zM9.5 3A1.5 1.5 0 0 0 8 4.5v1.379a.5.5 0 0 1-.293.445l-2 1.11A.5.5 0 0 1 5 7.029V5.5a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 .49.59L8.5 6.5h1V3z"/>
+                </svg>
+                Upload and Import
+            </button>
+            <div id="import-status" class="mt-2"></div>
+        </div>
+    </div>
+    <div id="danger-zone-card" class="card" style="margin-top: 30px; border-color: var(--error-color); display: none;">
+            <div class="card-header" style="background-color: transparent; color: var(--error-color); font-weight: 700;">Danger Zone</div>
+            <div class="card-body">
+                <h5 class="card-title text-primary">Reset All Task Data</h5>
+                <p class="card-text text-secondary">This will permanently delete all tasks, escalation logs, and pause logs. This action cannot be undone. User data will not be affected.</p>
+                <button class="btn btn-danger" onclick="handleResetData()"><svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.21 3.031-1.742 3.031H4.42c-1.532 0-2.492-1.697-1.742-3.031l5.58-9.92zM10 13a1 1 0 110-2 1 1 0 010 2zm-1-8a1 1 0 011-1h.008a1 1 0 011 1v3.008a1 1 0 01-1 1h-.008a1 1 0 01-1-1V5z" clip-rule="evenodd"></path></svg>Reset All Task Data</button>
+            </div>
+        </div>
+        
+        <div class="card" style="margin-top: 30px;">
+            <div class="card-body">
+            <h2>Automated Backups</h2>
+            <p class="text-secondary">A backup of all data CSVs is created daily. Here are the most recent backups available for download.</p>
+            <div id="backup-list-container" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; margin-top: 15px;">
+                <p>Loading backup list...</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="card" style="margin-top: 30px;">
+      <div class="card-body">
+        <h2>App Health & Activity</h2>
+        <div class="row mt-4">
+          <div class="col-md-3 mb-4"><div class="card"><div class="card-body scorecard"><div class="value" id="actionsToday">--</div><div class="label">Actions Today</div></div></div></div>
+          <div class="col-md-3 mb-4"><div class="card"><div class="card-body scorecard"><div class="value" id="actionsThisMonth">--</div><div class="label">Actions This Month</div></div></div></div>
+          <div class="col-md-2 mb-4"><div class="card"><div class="card-body scorecard"><div class="value" id="totalTasks">--</div><div class="label">Total Tasks</div></div></div></div>
+          <div class="col-md-2 mb-4"><div class="card"><div class="card-body scorecard"><div class="value" id="totalEscalations">--</div><div class="label">Escalations</div></div></div></div>
+          <div class="col-md-2 mb-4"><div class="card"><div class="card-body scorecard"><div class="value" id="totalPauses">--</div><div class="label">Pauses</div></div></div></div>
+          <div class="col-md-6 mb-4"><div class="card"><div class="card-body"><div class="label">Last Data Sync</div><div id="lastSync">--</div></div></div></div>
+          <div class="col-md-6 mb-4"><div class="card"><div class="card-body"><div class="label">Last Backup</div><div id="lastBackup">--</div></div></div></div>
+        </div>
+        <h2 class="mt-4">Detailed Activity Log</h2>
+        <div class="card mt-3">
+          <div class="card-body">
+            <input type="text" id="logSearch" class="form-control mb-3" placeholder="Search logs...">
+            <div style="max-height: 500px; overflow-y: auto;">
+              <table class="table table-sm">
+                <thead><tr><th>Timestamp</th><th>User</th><th>Action</th><th>Target</th><th>Details</th></tr></thead>
+                <tbody id="log-table-body">
+                  <tr><td colspan="5" class="text-center">Loading logs...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+</div>
+
+    <div class="modal fade" id="newTaskModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Create New Task</h5><button type="button" class="close" data-dismiss="modal">&times;</button></div><div class="modal-body"><form id="newTaskForm"><div class="form-group"><label>Case ID</label><input type="number" class="form-control" id="caseId" required></div><div class="form-group"><label>Market</label><select class="form-control" id="market" required><option>Poland</option><option>Portugal</option></select></div><div class="form-group"><label>Task Type</label><select class="form-control" id="taskType" required><option>Onboarding Qualify</option><option>Admin Creation</option><option>Menu Creation</option><option>Asset Delivery</option><option>Integration</option><option>Post OBQ</option></select></div><div class="form-group"><label>Comments</label><textarea class="form-control" id="comments" rows="3"></textarea></div></form></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-dismiss="modal"><svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path></svg>Close</button><button type="button" class="btn btn-primary" onclick="handleFormSubmit()"><svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>Create Task</button></div></div></div></div>
+
+<!-- ADD THIS ENTIRE MODAL BLOCK -->
+<div class="modal fade" id="escalationModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Select Escalation Reasons</h5>
+                <button type="button" class="close" data-dismiss="modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="text-secondary">Select all that apply for this escalation.</p>
+                <input type="hidden" id="escalationCaseId" value="">
+                <div id="escalationReasonsContainer" style="max-height: 300px; overflow-y: auto;">
+                    <!-- Checkboxes will be inserted here by JavaScript -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="handleEscalationSubmit()">OK</button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- Your main <script> tag starts right after this -->
+   <script>
+
+    const HTML_APP_VERSION = "1.4";
+
+    let currentUserRole = 'User';
+    let webAppUrl = '';
+
+    document.addEventListener("DOMContentLoaded", function() {
+        showView('tasks-view');
+        setActiveButton('my-tasks-btn');
+        document.getElementById('tasks-container').innerHTML = '<p>Initializing...</p>';
+        
+        google.script.run.withSuccessHandler(initializeApp).withFailureHandler(showError).getAppContext();
+        google.script.run.withSuccessHandler(url => { webAppUrl = url; setupNavLinks(); }).withFailureHandler(showError).getWebAppUrl();
+
+        // THIS CALL CHECKS FOR A NEWER VERSION OF THE SCRIPT
+        google.script.run.withSuccessHandler(checkVersion).getAppVersionInfo();
+        
+        document.getElementById('searchInput').addEventListener('keyup', function(event) { if (event.key === "Enter") { loadAllTasks(1); } });
+        document.getElementById('statusFilter').addEventListener('change', () => loadAllTasks(1));
+        document.getElementById('taskTypeFilter').addEventListener('change', () => loadAllTasks(1));
+        document.getElementById('myTasksStatusFilter').addEventListener('change', () => loadMyTasks());
+        document.getElementById('myTasksTaskTypeFilter').addEventListener('change', () => loadMyTasks());
+    });
+
+
+/**
+ * NEW FUNCTION: Compares the HTML version to the master script version from Version.gs.
+ * If the master version is newer, it displays an "Update" button.
+ */
+function checkVersion(versionInfo) {
+  // Check if the script version is newer than this HTML file's version
+  if (parseFloat(versionInfo.version) > parseFloat(HTML_APP_VERSION)) {
+    const updateContainer = document.getElementById('version-update-container');
+    // FIX: Only check that the container and a valid URL exist.
+    if (updateContainer && versionInfo.url) {
+      updateContainer.innerHTML = `<a href="${versionInfo.url}" target="_top" class="btn btn-warning btn-sm" style="color: #111827; text-decoration: none;">✨ Update Available to v${versionInfo.version}</a>`;
+    }
+  }
+}
+
+    function initializeApp(context) { currentUserRole = context.role; renderUIForRole(); loadMyTasks(); }
+    
+    function renderUIForRole() {
+        const isAdmin = (currentUserRole === 'Admin');
+        const isSuperAdmin = (currentUserRole === 'Super Admin');
+        
+        // Show/hide main navigation buttons
+        document.getElementById('all-tasks-btn').style.display =  'inline-block';
+        document.getElementById('dashboard-btn').style.display = 'inline-block';
+        document.getElementById('settings-btn').style.display = (isAdmin || isSuperAdmin) ? 'inline-block' : 'none';
+        
+        // Show/hide the "Danger Zone" card only for Super Admins
+        document.getElementById('danger-zone-card').style.display = isSuperAdmin ? 'block' : 'none';
+    }
+
+    function setupNavLinks() {
+    if (webAppUrl) {
+        document.getElementById('dashboard-btn').href = webAppUrl + '?page=dashboard';
+    }
+}
+    function showView(viewId) {
+        document.querySelectorAll('.view').forEach(v => { v.style.display = 'none'; });
+        document.getElementById(viewId).style.display = 'block';
+    }
+
+    function setActiveButton(activeBtnId) {
+        document.querySelectorAll('.nav-link').forEach(b => b.classList.remove('active'));
+        if (document.getElementById(activeBtnId)) {
+            document.getElementById(activeBtnId).classList.add('active');
+        }
+    }
+
+    function loadMyTasks() {
+        showView('tasks-view');
+        setActiveButton('my-tasks-btn');
+        document.getElementById('view-title').textContent = 'My Tasks';
+        document.getElementById('admin-controls').style.display = 'none';
+        document.getElementById('my-tasks-controls').style.display = 'block';
+        document.getElementById('tasks-container').innerHTML = '<p>Loading your tasks...</p>';
+
+        const myTaskTypeFilter = document.getElementById('myTasksTaskTypeFilter');
+        if (myTaskTypeFilter.options.length <= 1) {
+            const allTaskTypeFilter = document.getElementById('taskTypeFilter');
+            for(let i = 1; i < allTaskTypeFilter.options.length; i++) {
+                myTaskTypeFilter.add(allTaskTypeFilter.options[i].cloneNode(true));
+            }
+        }
+        
+        const options = {
+            statusFilter: document.getElementById('myTasksStatusFilter').value,
+            taskTypeFilter: document.getElementById('myTasksTaskTypeFilter').value
+        };
+        google.script.run.withSuccessHandler(displayTasks).withFailureHandler(showError).getUserTasks(options);
+    }
+
+    function loadAllTasks(page = 1) {
+        showView('tasks-view');
+        setActiveButton('all-tasks-btn');
+        document.getElementById('view-title').textContent = 'All Tasks';
+        document.getElementById('my-tasks-controls').style.display = 'none';
+        document.getElementById('admin-controls').style.display = 'block';
+        document.getElementById('tasks-container').innerHTML = '<p>Loading all tasks...</p>';
+        const options = { page: page, searchTerm: document.getElementById('searchInput').value, statusFilter: document.getElementById('statusFilter').value, taskTypeFilter: document.getElementById('taskTypeFilter').value };
+        google.script.run.withSuccessHandler(displayTasks).withFailureHandler(showError).getAllTasks(options);
+    }
+    
+    function loadSettings() {
+    showView('settings-view');
+    setActiveButton('settings-btn');
+    document.getElementById('users-table-container').innerHTML = '<p>Loading users...</p>';
+    google.script.run.withSuccessHandler(displayUsers).withFailureHandler(showError).getUsersAndRoles();
+    document.getElementById('backup-list-container').innerHTML = '<p>Loading backup list...</p>';
+    google.script.run.withSuccessHandler(displayBackups).withFailureHandler(showError).getBackupList();
+
+    // This line calls the function to load the audit data
+    google.script.run.withSuccessHandler(displayAuditData).withFailureHandler(showError).getAuditData();
+}
+    
+    const toLocalISOString = (dateStr) => {
+        if (!dateStr || new Date(dateStr).toString() === 'Invalid Date') return '';
+        const date = new Date(dateStr); const pad = n => `${Math.floor(Math.abs(n))}`.padStart(2, '0');
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    };
+
+    const formatDurationFromHours = (hours) => {
+        if (isNaN(hours) || hours === null) { return '00:00:00'; }
+        const sign = hours < 0 ? '-' : '';
+        const totalSeconds = Math.abs(hours * 3600);
+        const h = Math.floor(totalSeconds / 3600);
+        const m = Math.floor((totalSeconds % 3600) / 60);
+        const s = Math.floor(totalSeconds % 60);
+        const pad = (num) => String(num).padStart(2, '0');
+        return `${sign}${pad(h)}:${pad(m)}:${pad(s)}`;
+    };
+
+    const buildTimestampFieldHTML = (label, id, type, fieldName, timestampValue) => {
+        const displayValue = timestampValue ? new Date(timestampValue).toLocaleString() : '<span class="text-secondary">Not set</span>';
+        const editValue = toLocalISOString(timestampValue);
+        return `<div class="timestamp-field d-flex align-items-center" data-id="${id}" data-type="${type}" data-field-name="${fieldName}">
+                    <small class="text-secondary mr-2" style="min-width: 140px; font-weight:600;">${label}:</small>
+                    <span class="display-mode" style="font-weight:400;">${displayValue}</span>
+                    <input class="form-control form-control-sm edit-mode" type="datetime-local" value="${editValue}">
+                </div>`;
+    };
+    
+    const buildLogDetailsHTML = (task) => {
+        let h = '';
+        if (task.EscalationLogs && task.EscalationLogs.length > 0) {
+            h += `<hr class="my-2"><h6 class="mt-2 mb-1"><small class="text-secondary font-weight-bold">Escalation History</small></h6>`;
+            task.EscalationLogs.forEach(l => {
+                h += buildTimestampFieldHTML('Started', l['Log ID'], 'escalation', 'Escalation Start Time', l['Escalation Start Time']);
+                h += buildTimestampFieldHTML('Ended', l['Log ID'], 'escalation', 'Escalation End Time', l['Escalation End Time']);
+            });
+        }
+        if (task.PauseLogs && task.PauseLogs.length > 0) {
+            h += `<hr class="my-2"><h6 class="mt-2 mb-1"><small class="text-secondary font-weight-bold">Pause History</small></h6>`;
+            task.PauseLogs.forEach(l => {
+                h += buildTimestampFieldHTML('Started', l['Log ID'], 'pause', 'Pause Start Time', l['Pause Start Time']);
+                h += buildTimestampFieldHTML('Ended', l['Log ID'], 'pause', 'Pause End Time', l['Pause End Time']);
+            });
+        }
+        return h;
+    };
+
+
+    /**
+ * Handles the "Extract all Data" button click.
+ * Calls the starter function on the backend and displays the result.
+ */
+function handleExtractAllData() {
+    const button = document.getElementById('extractDataBtn');
+    const statusDiv = document.getElementById('extract-status');
+
+    // Provide immediate feedback to the user
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Extracting...';
+    statusDiv.innerHTML = '<p class="text-secondary">Creating spreadsheet and scheduling background job...</p>';
+
+    google.script.run
+        .withSuccessHandler(response => {
+            // Restore the button to its original state
+            button.disabled = false;
+            button.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+                                  <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
+                                  <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L6.354 8.146a.5.5 0 1 0-.708.708l2 2z"/>
+                                </svg> Extract all Data`;
+            
+            if (response.success) {
+                // Display the success message and the link to the new sheet
+                statusDiv.innerHTML = `
+                    <p style="color:var(--accent-primary); font-weight: 600;">Spreadsheet created successfully!</p>
+                    <p class="text-secondary">During the next few minutes, the data will be filled into this Google Sheet:</p>
+                    <a href="${response.reportUrl}" target="_blank" rel="noopener noreferrer">${response.reportUrl}</a>
+                `;
+            } else {
+                statusDiv.innerHTML = `<p class="text-danger">Error: ${response.message}</p>`;
+            }
+        })
+        .withFailureHandler(error => {
+            showError(error);
+            button.disabled = false;
+            button.innerHTML = '<svg>...</svg>Extract all Data'; // Simplified for brevity on error
+            statusDiv.innerHTML = `<p class="text-danger">A script error occurred.</p>`;
+        })
+        .startInternalReportExport(); // This calls the new starter function
+}
+
+    function displayTasks(response) {
+        if (!response.success) {
+            showError({ message: response.message });
+            if (response.totalPages !== undefined) renderPagination(0, 0);
+            return;
+        }
+        const tasks = response.data;
+        const container = document.getElementById('tasks-container');
+        if (!tasks || tasks.length === 0) {
+            container.innerHTML = '<div class="alert alert-info">No tasks found for the current filters.</div>';
+        } else {
+            const tasksByStatus = tasks.reduce((acc, task) => {
+                let status = task['Status'] || 'Unknown';
+                if (status === 'InProgress') {
+                    const hasActiveEscalation = task.EscalationLogs && task.EscalationLogs.some(log => !log['Escalation End Time']);
+                    const hasActivePause = task.PauseLogs && task.PauseLogs.some(log => !log['Pause End Time']);
+                    if (hasActiveEscalation) status = 'Escalated';
+                    else if (hasActivePause) status = 'Paused';
+                }
+                if (!acc[status]) acc[status] = [];
+                acc[status].push(task);
+                return acc;
+            }, {});
+
+            container.innerHTML = '';
+            const statusDisplayOrder = ['InProgress', 'Escalated', 'Paused', 'Completed'];
+
+            statusDisplayOrder.forEach(status => {
+                if (tasksByStatus[status] && tasksByStatus[status].length > 0) {
+                    let headerText = status === 'InProgress' ? 'In Progress' : status;
+                    container.innerHTML += `<h4 class="mt-4 mb-3 text-secondary" style="border-bottom: 1px solid var(--border-color); padding-bottom: 5px;">${headerText} Tasks</h4>`;
+                    
+                    const tasksByCaseId = tasksByStatus[status].reduce((acc, task) => {
+                        const id = task['Case ID'];
+                        if (!acc[id]) acc[id] = [];
+                        acc[id].push(task);
+                        return acc;
+                    }, {});
+
+                    for (const caseId in tasksByCaseId) {
+                        container.innerHTML += buildCaseCardHTML(caseId, tasksByCaseId[caseId]);
+                    }
+                }
+            });
+        }
+        if (response.totalPages) {
+            renderPagination(response.totalPages, response.currentPage);
+        } else {
+            document.getElementById('pagination-nav').innerHTML = '';
+        }
+    }
+
+    function buildCaseCardHTML(caseId, caseTasks) {
+    let cardContent = '', cardHeader = '';
+    const taskTypesForFlags = ["Asset Delivery", "Integration", "Menu Creation", "Admin Creation", "Post OBQ", "Onboarding Qualify"];
+    const showFlags = caseTasks.some(t => taskTypesForFlags.includes(t['Task type']));
+    const firstTask = caseTasks[0]; // We will use firstTask, as your single-task test case proves it's not the source of this specific bug.
+
+    let flagButtonsHTML = '';
+    if (showFlags) {
+        // --- FIX PART 1: Ensure buttons check for the correct field names ---
+        if (!firstTask['Asset Trigger Date']) flagButtonsHTML += `<button class="btn btn-asset-triggered btn-sm mr-2" onclick="handleFlagButtonClick('${caseId}', 'Asset Triggered Timestamp', event)"><svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path d="M6.2 4.9a.75.75 0 011.1 0l6.25 6.25a.75.75 0 010 1.1l-6.25 6.25a.75.75 0 01-1.1-1.1L11.8 12 6.2 6.5a.75.75 0 010-1.1z"></path></svg>Asset Triggered</button>`;
+        if (!firstTask['Asset Delivery Date']) flagButtonsHTML += `<button class="btn btn-asset-delivered btn-sm mr-2" onclick="handleFlagButtonClick('${caseId}', 'Asset Delivered Timestamp', event)"><svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.052-.143z" clip-rule="evenodd"></path></svg>Asset Delivered</button>`;
+        if (!firstTask['OnBoarding Done']) flagButtonsHTML += `<button class="btn btn-onboarding-done btn-sm mr-2" onclick="handleFlagButtonClick('${caseId}', 'OnBoarding Done Timestamp', event)"><svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path d="M7 8a3 3 0 100-6 3 3 0 000 6zM14.5 9a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM12.89 12.41a6.983 6.983 0 00-5.78 0 3.003 3.003 0 00-2.11 2.89c0 1.02.42 1.95 1.12 2.59A3.003 3.003 0 008 19h4a3.003 3.003 0 002.11-1.11c.7-.64 1.12-1.57 1.12-2.59a3.003 3.003 0 00-2.11-2.89z"></path></svg>OnBoarding Done</button>`;
+    }
+    
+    let flagTimestampsHTML = '<hr class="my-2"><h6 class="mt-2 mb-1"><small class="text-secondary font-weight-bold">Case Flags</small></h6>';
+    
+    // --- FIX PART 2: Ensure the display function is given the correct field names to read from ---
+    flagTimestampsHTML += buildTimestampFieldHTML('Asset Triggered', caseId, 'case_flag', 'Asset Trigger Date', firstTask['Asset Trigger Date']);
+    flagTimestampsHTML += buildTimestampFieldHTML('Asset Delivered', caseId, 'case_flag', 'Asset Delivery Date', firstTask['Asset Delivery Date']);
+    flagTimestampsHTML += buildTimestampFieldHTML('OnBoarding Done', caseId, 'case_flag', 'OnBoarding Done', firstTask['OnBoarding Done']);
+    
+    if (caseTasks.length === 1) {
+        const task = caseTasks[0]; cardHeader = `Case ID: ${caseId} - <span style="font-weight:600;">${task['Task type']}</span>`;
+        let buttons = ''; 
+        const hasActiveEscalation = task.EscalationLogs && task.EscalationLogs.some(log => !log['Escalation End Time']);
+        const hasActivePause = task.PauseLogs && task.PauseLogs.some(log => !log['Pause End Time']);
+        if (task['Status'] === 'InProgress') { 
+            if (hasActiveEscalation) { buttons += `<button class="btn btn-stop-escalation btn-sm mr-2" onclick="handleStopEscalation('${caseId}', event)"><svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path d="M6.25 5C5.56 5 5 5.56 5 6.25v7.5c0 .69.56 1.25 1.25 1.25h7.5c.69 0 1.25-.56 1.25-1.25V6.25C15 5.56 14.44 5 13.75 5H6.25z"></path></svg>Stop Escalation</button>`; } 
+            else if (!hasActivePause) { buttons += `<button class="btn btn-start-escalation btn-sm mr-2" onclick="openEscalationModal('${caseId}', event)"><svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path d="M3 3.75A.75.75 0 013.75 3h12.5a.75.75 0 010 1.5H3.75A.75.75 0 013 3.75zM3 8.75A.75.75 0 013.75 8h12.5a.75.75 0 010 1.5H3.75A.75.75 0 013 8.75zM3 13.75a.75.75 0 01.75-.75h12.5a.75.75 0 010 1.5H3.75a.75.75 0 01-.75-.75z"></path></svg>Start Escalation</button>`; }
+            if (hasActivePause) { buttons += `<button class="btn btn-stop-pause btn-sm mr-2" onclick="handleStopPause('${caseId}', event)"><svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path d="M6.2 4.9a.75.75 0 011.1 0l6.25 6.25a.75.75 0 010 1.1l-6.25 6.25a.75.75 0 01-1.1-1.1L11.8 12 6.2 6.5a.75.75 0 010-1.1z"></path></svg>Stop Pause</button>`; } 
+            else if (!hasActiveEscalation) { buttons += `<button class="btn btn-start-pause btn-sm mr-2" onclick="handleStartPause('${caseId}', event)"><svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path d="M5.75 5.5a.75.75 0 00-.75.75v8.5c0 .414.336.75.75.75h1.5a.75.75 0 00.75-.75v-8.5a.75.75 0 00-.75-.75h-1.5zm7 0a.75.75 0 00-.75.75v8.5c0 .414.336.75.75.75h1.5a.75.75 0 00.75-.75v-8.5a.75.75 0 00-.75-.75h-1.5z"></path></svg>Start Pause</button>`; }
+            buttons += `<button class="btn btn-end-task btn-sm mr-2" onclick="handleEndTask('${task['Log ID']}', '${caseId}', event)"><svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 9.5a.5.5 0 01.5-.5h3a.5.5 0 010 1h-3a.5.5 0 01-.5-.5z"></path></svg>End Task</button>`; 
+        } 
+        if (currentUserRole !== 'User') { buttons += `<button class="btn btn-danger btn-sm" onclick="handleDeleteTask('${task['Log ID']}', '${caseId}', '${task['Task type']}', event)"><svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75V4.5h8V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4.5a1.25 1.25 0 01-1.25-1.25V3.75h2.5v-.5A1.25 1.25 0 0110 4.5zM3.75 6A1.75 1.75 0 002 7.75v8.5A1.75 1.75 0 003.75 18h12.5A1.75 1.75 0 0018 16.25v-8.5A1.75 1.75 0 0016.25 6H3.75z" clip-rule="evenodd"></path></svg>Delete</button>`; }
+        cardContent = `<div class="card-body"><p class="mb-1"><strong>Status:</strong> ${task['Status']} | <strong>SLA:</strong> ${task.SLA_Status}</p><p class="mb-1"><small class="text-secondary font-weight-bold">SLA Time Remaining:</small> <small>${formatDurationFromHours(task.SLA_Time_Display)}</small></p><p class="mb-1">
+    <small class="text-secondary font-weight-bold">Total Escalation:</small> 
+    <small>${task.Status === 'Completed' ? (task['Stored Escalation Duration'] || '00:00:00') : formatDurationFromHours(task.TotalEscalationHours)}</small> | 
+    <small class="text-secondary font-weight-bold">Total Pause:</small> 
+    <small>${task.Status === 'Completed' ? (task['Stored Paused Duration'] || '00:00:00') : formatDurationFromHours(task.TotalPauseHours)}</small>
+    </p><small class="text-secondary">Assigned to: ${task['User']}</small><br>${buildTimestampFieldHTML('Task Started', task['Log ID'], 'task', 'Start Timestamp', task['Start Timestamp'])}${buildTimestampFieldHTML('Task Ended', task['Log ID'], 'task', 'End Timestamp', task['End Timestamp'])}${flagTimestampsHTML}${buildLogDetailsHTML(task)}<div class="mt-3">${flagButtonsHTML}</div><div class="mt-3">${buttons}</div></div>`;
+    } else {
+        cardHeader = `Case ID: ${caseId}`; let listHTML = '';
+        caseTasks.forEach(task => {
+            let buttons = ''; 
+            const hasActiveEscalation = task.EscalationLogs && task.EscalationLogs.some(log => !log['Escalation End Time']);
+            const hasActivePause = task.PauseLogs && task.PauseLogs.some(log => !log['Pause End Time']);
+            if (task['Status'] === 'InProgress') { 
+                if (hasActiveEscalation) { buttons += `<button class="btn btn-stop-escalation btn-sm mr-2" onclick="handleStopEscalation('${caseId}', event)"><svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path d="M6.25 5C5.56 5 5 5.56 5 6.25v7.5c0 .69.56 1.25 1.25 1.25h7.5c.69 0 1.25-.56 1.25-1.25V6.25C15 5.56 14.44 5 13.75 5H6.25z"></path></svg>Stop Escalation</button>`; } 
+                else if (!hasActivePause) { buttons += `<button class="btn btn-start-escalation btn-sm mr-2" onclick="openEscalationModal('${caseId}', event)"><svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path d="M3 3.75A.75.75 0 013.75 3h12.5a.75.75 0 010 1.5H3.75A.75.75 0 013 3.75zM3 8.75A.75.75 0 013.75 8h12.5a.75.75 0 010 1.5H3.75A.75.75 0 013 8.75zM3 13.75a.75.75 0 01.75-.75h12.5a.75.75 0 010 1.5H3.75a.75.75 0 01-.75-.75z"></path></svg>Start Escalation</button>`; }
+                if (hasActivePause) { buttons += `<button class="btn btn-stop-pause btn-sm mr-2" onclick="handleStopPause('${caseId}', event)"><svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path d="M6.2 4.9a.75.75 0 011.1 0l6.25 6.25a.75.75 0 010 1.1l-6.25 6.25a.75.75 0 01-1.1-1.1L11.8 12 6.2 6.5a.75.75 0 010-1.1z"></path></svg>Stop Pause</button>`; } 
+                else if (!hasActiveEscalation) { buttons += `<button class="btn btn-start-pause btn-sm mr-2" onclick="handleStartPause('${caseId}', event)"><svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path d="M5.75 5.5a.75.75 0 00-.75.75v8.5c0 .414.336.75.75.75h1.5a.75.75 0 00.75-.75v-8.5a.75.75 0 00-.75-.75h-1.5zm7 0a.75.75 0 00-.75.75v8.5c0 .414.336.75.75.75h1.5a.75.75 0 00.75-.75v-8.5a.75.75 0 00-.75-.75h-1.5z"></path></svg>Start Pause</button>`; }
+                buttons += `<button class="btn btn-end-task btn-sm mr-2" onclick="handleEndTask('${task['Log ID']}', '${caseId}', event)"><svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 9.5a.5.5 0 01.5-.5h3a.5.5 0 010 1h-3a.5.5 0 01-.5-.5z"></path></svg>End Task</button>`; 
+            } 
+            if (currentUserRole !== 'User') { buttons += `<button class="btn btn-danger btn-sm" onclick="handleDeleteTask('${task['Log ID']}', '${caseId}', '${task['Task type']}', event)"><svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75V4.5h8V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4.5a1.25 1.25 0 01-1.25-1.25V3.75h2.5v-.5A1.25 1.25 0 0110 4.5zM3.75 6A1.75 1.75 0 002 7.75v8.5A1.75 1.75 0 003.75 18h12.5A1.75 1.75 0 0018 16.25v-8.5A1.75 1.75 0 0016.25 6H3.75z" clip-rule="evenodd"></path></svg>Delete</button>`; }
+            listHTML += `<li class="list-group-item"><div class="d-flex w-100 justify-content-between align-items-center"><h5><span class="badge badge-primary">${task['Task type']}</span></h5><small class="text-secondary">Assigned to: ${task['User']}</small></div><p class="mb-1 mt-2"><strong>Status:</strong> ${task['Status']} | <strong>SLA:</strong> ${task.SLA_Status}</p><p class="mb-1"><small class="text-secondary font-weight-bold">SLA Time Remaining:</small> <small>${formatDurationFromHours(task.SLA_Time_Display)}</small></p><p class="mb-1">
+    <small class="text-secondary font-weight-bold">Total Escalation:</small> 
+    <small>${task.Status === 'Completed' ? (task['Stored Escalation Duration'] || '00:00:00') : formatDurationFromHours(task.TotalEscalationHours)}</small> | 
+    <small class="text-secondary font-weight-bold">Total Pause:</small> 
+    <small>${task.Status === 'Completed' ? (task['Stored Paused Duration'] || '00:00:00') : formatDurationFromHours(task.TotalPauseHours)}</small>
+    </p>${buildTimestampFieldHTML('Task Started', task['Log ID'], 'task', 'Start Timestamp', task['Start Timestamp'])}${buildTimestampFieldHTML('Task Ended', task['Log ID'], 'task', 'End Timestamp', task['End Timestamp'])}${buildLogDetailsHTML(task)}<div class="mt-3">${buttons}</div></li>`;
+        });
+        cardContent = `<div class="card-body">${flagTimestampsHTML}<div class="mt-3">${flagButtonsHTML}</div></div><ul class="list-group list-group-flush">${listHTML}</ul>`;
+    }
+    const adminEditButtons = currentUserRole !== 'User' ? `<div class="card-footer"><button class="btn btn-secondary btn-sm edit-btn" onclick="toggleEditMode('${caseId}', true)"><svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z"></path><path fill-rule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clip-rule="evenodd"></path></svg>Edit Timestamps</button><button class="btn btn-primary btn-sm save-btn" style="display:none;" onclick="handleSaveTimestamps('${caseId}')"><svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path d="M7.5 2.5a.5.5 0 00-1 0v1.5H4a.5.5 0 000 1h2.5V14a.5.5 0 00.5.5h5a.5.5 0 00.5-.5V8.803a.5.5 0 00-.275-.447l-3.5-2A.5.5 0 0010 6.5v.512a.5.5 0 00.5.5h.5a.5.5 0 00.5-.5V6.5a1.5 1.5 0 011.225-1.447l3.5-2A1.5 1.5 0 0117 4.197V14.5a1.5 1.5 0 01-1.5 1.5h-5A1.5 1.5 0 019 14.5V4a.5.5 0 00-.5-.5H7.5V2.5z"></path></svg>Save Changes</button><button class="btn btn-light btn-sm cancel-btn" style="display:none;" onclick="toggleEditMode('${caseId}', false)"><svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path></svg>Cancel</button></div>` : '';
+    return `<div class="card" id="case-card-${caseId}"><div class="card-header">${cardHeader}</div>${cardContent}${adminEditButtons}</div>`;
+}
+    
+    function renderPagination(totalPages, currentPage) { const nav = document.getElementById('pagination-nav'); if (totalPages <= 1) { nav.innerHTML = ''; return; } let prev = (currentPage === 1) ? 'disabled' : ''; let next = (currentPage === totalPages) ? 'disabled' : ''; nav.innerHTML = `<ul class="pagination"><li class="page-item ${prev}"><a class="page-link" href="#" onclick="loadAllTasks(${currentPage - 1}); return false;">Previous</a></li><li class="page-item disabled"><span class="page-link">Page ${currentPage} of ${totalPages}</span></li><li class="page-item ${next}"><a class="page-link" href="#" onclick="loadAllTasks(${currentPage + 1}); return false;">Next</a></li></ul>`; }
+    
+    function displayUsers(response) {
+        if (!response.success) {
+            showError({ message: response.message });
+            return;
+        }
+        const users = response.data;
+        const container = document.getElementById('users-table-container');
+        let tableHTML = '<table class="table"><thead><tr><th>Email</th><th>Role</th><th>Action</th></tr></thead><tbody>';
+        
+        users.forEach(user => {
+            tableHTML += `<tr>
+            <td>${user.Email}</td>
+            <td>${user.Role}</td>
+            <td>
+                <button class="btn btn-danger btn-sm" onclick="handleDeleteUser('${user.Email}', event)" title="Delete User">
+                <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75V4.5h8V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4.5a1.25 1.25 0 01-1.25-1.25V3.75h2.5v-.5A1.25 1.25 0 0110 4.5zM3.75 6A1.75 1.75 0 002 7.75v8.5A1.75 1.75 0 003.75 18h12.5A1.75 1.75 0 0018 16.25v-8.5A1.75 1.75 0 0016.25 6H3.75z" clip-rule="evenodd"></path></svg>
+                </button>
+            </td>
+            </tr>`;
+        });
+        
+        tableHTML += '</tbody></table>';
+        container.innerHTML = tableHTML;
+
+        const roleSelect = document.getElementById('userRole');
+        roleSelect.innerHTML = '';
+        const roles = (currentUserRole === 'Super Admin') 
+            ? ['User', 'Admin', 'Super Admin'] 
+            : ['User', 'Admin'];
+        roles.forEach(role => {
+            const option = document.createElement('option');
+            option.value = role;
+            option.textContent = role;
+            roleSelect.appendChild(option);
+        });
+    }
+
+    function handleDeleteUser(email, event) {
+        if (confirm(`Are you sure you want to permanently delete the user: ${email}?`)) {
+            const button = event.target.closest('button');
+            const originalHTML = button.innerHTML;
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+            google.script.run
+            .withSuccessHandler(response => {
+                alert(response.message);
+                if(response.success) {
+                loadSettings();
+                }
+                button.disabled = false;
+                button.innerHTML = originalHTML;
+            })
+            .withFailureHandler(error => {
+                showError(error);
+                button.disabled = false;
+                button.innerHTML = originalHTML;
+            })
+            .deleteUser(email);
+        }
+    }
+    
+    function showError(error) { const c = document.getElementById('tasks-container'); c.innerHTML = `<div class="alert alert-danger" style="background-color: #f8d7da; border-color: #f5c6cb; color: #721c24;">Error: ${error.message}</div>`; alert(`An error occurred: ${error.message}`); }
+    
+    function handleFormSubmit(){const d={caseId:document.getElementById('caseId').value,market:document.getElementById('market').value,taskType:document.getElementById('taskType').value,comments:document.getElementById('comments').value};if(!d.caseId||!d.market||!d.taskType){alert('Please fill out all required fields.');return;}const b=event.target;b.disabled=true;b.innerHTML='<i class="fas fa-spinner fa-spin"></i>Creating...';google.script.run.withSuccessHandler(r=>{alert(r.message);if(r.success){$('#newTaskModal').modal('hide');document.getElementById('newTaskForm').reset();loadMyTasks();}b.disabled=false;b.innerHTML='<svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>Create Task';}).withFailureHandler(e=>{showError(e);b.disabled=false;b.innerHTML='<svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>Create Task';}).createNewTask(d);}
+    
+    function handleSaveUser() { const userData = { email: document.getElementById('userEmail').value, role: document.getElementById('userRole').value }; if (!userData.email) { alert('Please enter an email address.'); return; } google.script.run.withSuccessHandler(response => { alert(response.message); if (response.success) { document.getElementById('userForm').reset(); loadSettings(); } }).withFailureHandler(showError).updateUserRole(userData); }
+    
+    function handleCsvUpload() { const fileInput = document.getElementById('csvUploader'); const importType = document.getElementById('importDataType').value; const statusDiv = document.getElementById('import-status'); if (fileInput.files.length === 0) { alert('Please select a file to upload.'); return; } const file = fileInput.files[0]; const reader = new FileReader(); reader.onload = function(event) { const fileContent = event.target.result; statusDiv.innerHTML = '<p class="text-secondary">Importing... Please wait.</p>'; google.script.run.withSuccessHandler(response => { if (response.success) { statusDiv.innerHTML = `<p style="color:var(--accent-primary);">${response.message}</p>`; alert(response.message); fileInput.value = ''; } else { statusDiv.innerHTML = `<p style="color:var(--error-color);">${response.message}</p>`; alert(`Error: ${response.message}`); } }).withFailureHandler(error => { showError(error); statusDiv.innerHTML = `<p class="text-danger">A script error occurred.</p>`; }).bulkImportData(fileContent, importType); }; reader.readAsText(file); }
+    
+    function handleResetData() { const confirmation = prompt('This is a highly destructive action. To confirm, please type "DELETE" in the box below.'); if (confirmation === "DELETE") { const button = event.target; button.disabled = true; button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Resetting...'; google.script.run.withSuccessHandler(response => { alert(response.message); if (response.success) { loadAllTasks(1); } button.disabled = false; button.innerHTML = '<svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.21 3.031-1.742 3.031H4.42c-1.532 0-2.492-1.697-1.742-3.031l5.58-9.92zM10 13a1 1 0 110-2 1 1 0 010 2zm-1-8a1 1 0 011-1h.008a1 1 0 011 1v3.008a1 1 0 01-1 1h-.008a1 1 0 01-1-1V5z" clip-rule="evenodd"></path></svg>Reset All Task Data'; }).withFailureHandler(error => { showError(error); button.disabled = false; button.innerHTML = '<svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.21 3.031-1.742 3.031H4.42c-1.532 0-2.492-1.697-1.742-3.031l5.58-9.92zM10 13a1 1 0 110-2 1 1 0 010 2zm-1-8a1 1 0 011-1h.008a1 1 0 011 1v3.008a1 1 0 01-1 1h-.008a1 1 0 01-1-1V5z" clip-rule="evenodd"></path></svg>Reset All Task Data'; }).resetAllTaskData(); } else { alert('Reset cancelled. You did not type "DELETE".'); } }
+    
+    function refreshSingleCaseCard(caseId) {
+        google.script.run
+        .withSuccessHandler(response => {
+            if (response.success && response.data.length > 0) {
+            const oldCard = document.getElementById(`case-card-${caseId}`);
+            if(oldCard) {
+                const newCardHTML = buildCaseCardHTML(caseId, response.data);
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = newCardHTML;
+                oldCard.parentNode.replaceChild(tempDiv.firstChild, oldCard);
+            }
+            } else if (response.success && response.data.length === 0) {
+                const oldCard = document.getElementById(`case-card-${caseId}`);
+                if(oldCard) oldCard.remove();
+            } else {
+                showError({message: response.message || "Failed to refresh card data."});
+            }
+        })
+        .withFailureHandler(showError)
+        .getCaseTasks(caseId);
+    }
+
+    function handleEndTask(logId, caseId, event){
+        const button = event.target.closest('button');
+        const originalHTML = button.innerHTML;
+        button.disabled = true;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+        google.script.run.withSuccessHandler(r => { 
+            alert(r.message); 
+            refreshSingleCaseCard(caseId);
+        }).withFailureHandler(err => {
+            showError(err);
+            button.disabled = false;
+            button.innerHTML = originalHTML;
+        }).endTask(logId);
+    }
+    
+    function handleDeleteTask(logId, caseId, taskType, event) {
+        if (confirm(`Are you sure you want to permanently delete task ${logId}?`)) {
+            const button = event.target.closest('button');
+            const cardElement = button.closest('.card');
+            const originalHTML = button.innerHTML;
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            google.script.run
+            .withSuccessHandler(response => {
+                alert(response.message);
+                if (response.success) {
+                const taskItems = cardElement.querySelectorAll('.list-group-item');
+                if (taskItems.length <= 1) {
+                    cardElement.style.transition = 'opacity 0.5s ease';
+                    cardElement.style.opacity = '0';
+                    setTimeout(() => cardElement.remove(), 500);
+                } else {
+                    refreshSingleCaseCard(caseId);
+                }
+                } else {
+                button.disabled = false;
+                button.innerHTML = originalHTML;
+                }
+            })
+            .withFailureHandler(error => {
+                showError(error);
+                button.disabled = false;
+                button.innerHTML = originalHTML;
+            })
+            .deleteTask(logId, caseId, taskType);
+        }
+    }
+
+   
+    
+    function handleFlagButtonClick(caseId, flagType, event) { const button = event.target.closest('button'); const originalHTML = button.innerHTML; button.disabled = true; button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...'; google.script.run.withSuccessHandler(r => { alert(r.message); refreshSingleCaseCard(caseId); }).withFailureHandler(err => { showError(err); button.disabled = false; button.innerHTML = originalHTML; }).setFlagTimestamp(caseId, flagType); }
+    
+    function toggleEditMode(caseId, isEditing) { const card = document.getElementById(`case-card-${caseId}`); card.querySelectorAll('.display-mode').forEach(el => el.style.display = isEditing ? 'none' : 'inline-block'); card.querySelectorAll('.edit-mode').forEach(el => el.style.display = isEditing ? 'inline-block' : 'none'); card.querySelector('.edit-btn').style.display = isEditing ? 'none' : 'inline-block'; card.querySelector('.save-btn').style.display = isEditing ? 'inline-block' : 'none'; card.querySelector('.cancel-btn').style.display = isEditing ? 'inline-block' : 'none'; }
+    
+    function handleSaveTimestamps(caseId) { const card = document.getElementById(`case-card-${caseId}`); const payload = []; card.querySelectorAll('.timestamp-field').forEach(field => { const id = field.dataset.id; const type = field.dataset.type; const fieldName = field.dataset.fieldName; const input = field.querySelector('.edit-mode'); const originalDisplaySpan = field.querySelector('.display-mode'); const originalDate = originalDisplaySpan.textContent.includes('Not set') ? '' : new Date(originalDisplaySpan.textContent); const originalValueForComparison = toLocalISOString(originalDate); if (input.value !== originalValueForComparison) { const isoValue = input.value ? new Date(input.value).toISOString() : ''; let update = payload.find(p => p.id === id && p.type === type); if (!update) { update = { id: id, type: type, data: {} }; payload.push(update); } update.data[fieldName] = isoValue; } }); if (payload.length > 0) { google.script.run.withSuccessHandler(r => { alert(r.message); refreshSingleCaseCard(caseId); }).withFailureHandler(showError).updateTimestamps(payload); } else { toggleEditMode(caseId, false); } }
+    
+    function handleStartEscalation(caseId, event) { const button = event.target.closest('button'); const originalHTML = button.innerHTML; button.disabled = true; button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Starting...'; google.script.run.withSuccessHandler(r => { alert(r.message); refreshSingleCaseCard(caseId); }).withFailureHandler(err => { showError(err); button.disabled = false; button.innerHTML = originalHTML; }).startEscalation(caseId); }
+    
+    function handleStopEscalation(caseId, event) { const button = event.target.closest('button'); const originalHTML = button.innerHTML; button.disabled = true; button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Stopping...'; google.script.run.withSuccessHandler(r => { alert(r.message); refreshSingleCaseCard(caseId); }).withFailureHandler(err => { showError(err); button.disabled = false; button.innerHTML = originalHTML; }).stopEscalation(caseId); }
+    
+    function handleStartPause(caseId, event) { const button = event.target.closest('button'); const originalHTML = button.innerHTML; button.disabled = true; button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Pausing...'; google.script.run.withSuccessHandler(r => { alert(r.message); refreshSingleCaseCard(caseId); }).withFailureHandler(err => { showError(err); button.disabled = false; button.innerHTML = originalHTML; }).startPause(caseId); }
+    
+    function handleStopPause(caseId, event) { const button = event.target.closest('button'); const originalHTML = button.innerHTML; button.disabled = true; button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Resuming...'; google.script.run.withSuccessHandler(r => { alert(r.message); refreshSingleCaseCard(caseId); }).withFailureHandler(err => { showError(err); button.disabled = false; button.innerHTML = originalHTML; }).stopPause(caseId); }
+    
+
+    function openEscalationModal(caseId, event) {
+    if (event) event.stopPropagation(); // Prevent card from collapsing
+
+    const reasons = [
+        'Incorrect Account Info - Basic Information', 'Incorrect Account Info – Location', 
+        'Incorrect Account Info - Billing and Invoicing', 'Incorrect Account Info - Delivery Setup',
+        'Incorrect Account Info – Tags', 'Cover Image – Incorrect', 'Cover Image – Missing',
+        'Menu - Incorrect Source', 'Menu - Missing Source', 'Photo - Low Coverage',
+        'Photo - Poor Quality', 'Asset - Incorrect delivery address', 'Asset - Not picked up by merchant'
+    ];
+    
+    const container = document.getElementById('escalationReasonsContainer');
+    container.innerHTML = ''; // Clear previous checkboxes
+    
+    reasons.forEach(reason => {
+        // Create a unique ID for each checkbox and label
+        const checkboxId = `reason-${reason.replace(/[^a-zA-Z0-9]/g, '')}`;
+        container.innerHTML += `
+            <div class="form-check my-2">
+                <input class="form-check-input" type="checkbox" value="${reason}" id="${checkboxId}">
+                <label class="form-check-label" for="${checkboxId}">
+                    ${reason}
+                </label>
+            </div>`;
+    });
+
+    // Store the case ID in the hidden input field inside the modal
+    document.getElementById('escalationCaseId').value = caseId;
+    // Show the modal using jQuery
+    $('#escalationModal').modal('show');
+}
+
+/**
+ * Gathers selected reasons from the modal and calls the backend script.
+ */
+function handleEscalationSubmit() {
+    const caseId = document.getElementById('escalationCaseId').value;
+    const checkedBoxes = document.querySelectorAll('#escalationReasonsContainer input:checked');
+    
+    if (checkedBoxes.length === 0) {
+        alert('Please select at least one reason for the escalation.');
+        return;
+    }
+
+    const selectedReasons = Array.from(checkedBoxes).map(cb => cb.value);
+    const reasonsString = selectedReasons.join(', ');
+
+    // Find the button on the card to show a loading state
+    const card = document.getElementById(`case-card-${caseId}`);
+    if(card){
+        const button = card.querySelector('.btn-start-escalation');
+        if(button){
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Starting...';
+        }
+    }
+
+    // Close the modal
+    $('#escalationModal').modal('hide');
+
+    // Call the backend function with the reasons string
+    google.script.run
+        .withSuccessHandler(r => { 
+            alert(r.message); 
+            refreshSingleCaseCard(caseId); // Refresh the card to show the new log
+        })
+        .withFailureHandler(showError)
+        .startEscalation(caseId, reasonsString);
+}
+
+
+
+    function displayBackups(response) {
+      const container = document.getElementById('backup-list-container');
+      if (!response.success) {
+        container.innerHTML = `<p class="text-danger">${response.message}</p>`;
+        return;
+      }
+      const backups = response.data;
+      if (backups.length === 0) {
+        container.innerHTML = '<p class="text-secondary">No backups found yet.</p>';
+        return;
+      }
+      let listHtml = '';
+      backups.forEach(backup => {
+        listHtml += `<div style="margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
+            <span>${backup.name}</span>
+            <a href="${backup.url}" target="_blank" class="btn btn-secondary btn-sm">Download</a>
+        </div>`;
+      });
+      container.innerHTML = listHtml;
+    }
+
+    let fullLogData = [];
+
+function displayAuditData(response) {
+  console.log("displayAuditData function was called.");
+  if (response && response.success) {
+    console.log("Response was successful. Data received from server:", response);
+    try {
+      const sc = response.scorecards;
+      document.getElementById('actionsToday').textContent = sc.actionsToday;
+      document.getElementById('actionsThisMonth').textContent = sc.actionsThisMonth;
+      document.getElementById('totalTasks').textContent = sc.totalTasks;
+      document.getElementById('totalEscalations').textContent = sc.totalEscalations;
+      document.getElementById('totalPauses').textContent = sc.totalPauses;
+      document.getElementById('lastSync').textContent = sc.lastSync;
+      document.getElementById('lastBackup').textContent = sc.lastBackup;
+
+      fullLogData = response.logs;
+      renderLogTable(fullLogData);
+
+      const logSearchInput = document.getElementById('logSearch');
+      if (logSearchInput && !logSearchInput.hasAttribute('data-listener-attached')) {
+          logSearchInput.addEventListener('keyup', function(event) {
+              const searchTerm = event.target.value.toLowerCase();
+              if (!fullLogData) return;
+              const filteredLogs = fullLogData.filter(log => Object.values(log).some(val => String(val).toLowerCase().includes(searchTerm)));
+              renderLogTable(filteredLogs);
+          });
+          logSearchInput.setAttribute('data-listener-attached', 'true');
+      }
+    } catch (e) {
+      console.error("A JavaScript error occurred while displaying audit data:", e);
+    }
+  } else {
+    console.error("Server response for audit data was not successful:", response);
+  }
+}
+
+function renderLogTable(logs) {
+  const tbody = document.getElementById('log-table-body');
+  if (!logs || logs.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center">No logs found.</td></tr>';
+    return;
+  }
+  let tableHtml = '';
+  logs.forEach(log => {
+    const formattedDate = new Date(log.timestamp).toLocaleString();
+    const targetDisplay = log.caseId !== 'N/A' ? log.caseId : log.targetId;
+    tableHtml += `<tr>
+        <td>${formattedDate}</td>
+        <td>${log.user}</td>
+        <td>${log.action}</td>
+        <td>${targetDisplay}</td>
+        <td>${log.details}</td>
+    </tr>`;
+  });
+  tbody.innerHTML = tableHtml;
+}
+
+
+</script>
+</body>
+</html>

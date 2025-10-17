@@ -1,0 +1,36 @@
+// ==============================================================================
+// VERSION CONTROL - REVISED LOGIC
+// ==============================================================================
+// This file uses PropertiesService as the single source of truth for versioning.
+
+/**
+ * This is the function your web app will call.
+ * It reads the master version info from the central PropertiesService.
+ * @returns {object} An object containing the master version and the new URL.
+ */
+function getAppVersionInfo() {
+  const scriptProperties = PropertiesService.getScriptProperties();
+  const masterVersion = scriptProperties.getProperty('MASTER_VERSION');
+  const masterUrl = scriptProperties.getProperty('MASTER_URL');
+  
+  return {
+    version: masterVersion || "1.0", // Default to 1.0 if not set
+    url: masterUrl || ""
+  };
+}
+
+/**
+ * !!! IMPORTANT !!!
+ * This is a UTILITY function that YOU, the developer, will run MANUALLY from the editor.
+ * This function sets the master version and URL for all old deployments to see.
+ */
+function setMasterVersion() {
+  const newVersion = "1.9"; // <-- The new version you are about to release
+  const newUrl = "https://script.google.com/a/macros/cognizant.com/s/AKfycbz6o18rUQKGbiOnygldfHrNTurMIMqlFbmkrWl2Yl3oqEMcAlslRp3q0UEXXzv4FbUS/exec"; // <-- The URL from your new deployment
+
+  const scriptProperties = PropertiesService.getScriptProperties();
+  scriptProperties.setProperty('MASTER_VERSION', newVersion);
+  scriptProperties.setProperty('MASTER_URL', newUrl);
+  
+  Logger.log(`✅ Master version successfully set to ${newVersion}`);
+}

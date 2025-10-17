@@ -1,0 +1,2337 @@
+// =================================================================
+// FILE IDs & CONFIG
+// =================================================================
+const SUB_TASK_FILE_ID = "1EPme5e14agnNBm80Kx7BEOWjfPtDOELr";
+const ESCALATION_LOGS_FILE_ID = "17WwXrYSUFYAiAsbSi6nCfgjOp_MNTb5v";
+const PAUSE_LOGS_FILE_ID = "1ksGOgIXi4VVsN0QG-c-yBQLGAUmVyt2y";
+const USERS_FILE_ID = "1mtavsCVYDcFjYsNgusmG6NbOvgnzo7bf";
+
+const TIMEZONE = "Europe/Warsaw";
+
+// --- For Bulk Export from Old Sheet ---
+const SOURCE_SHEET_ID = "1ZQUcYK81yYYwRjuyG99agU4bWipfTehe5AXXRZEC2SM";
+
+// For Audit Logs
+const AUDIT_LOG_FILE_ID = "1ktzLhTnBOfFSHasBTdqbZxu22FVDePY_gt3Rb13F8Kk";
+
+
+// Add these constants to the top of code.gs
+
+const ACTIVE_TASKS_SHEET_ID = '1gzrZEqUoVe9B8CfdBX7hdDuod_TdTWL2pQnbsgTwz88';
+const ACTIVE_ESCALATIONS_SHEET_ID = '1WDTVxCZowgsn7d3A1jQkR-7IuJzKxfK621pVg_HUOe4';
+const ACTIVE_PAUSES_SHEET_ID = '1Yfql1AAIFah0pKIiFN4vioKxOdjVeS-pPrERAnzf9JI';
+
+
+// CHANGE 1: ADD THIS MASTER HEADER LIST. This is now the single source of truth for your column structure.
+const SUB_TASK_HEADERS = [
+    'Log ID', 'Date', 'Case ID', 'Market', 'User', 'Task type',
+    'Start Timestamp', 'End Timestamp', 'OBQ Reasons', 'Case Created',
+    'Status', 'Comments', 'Escalation Reasons', 'Stored Escalation Duration',
+    'Stored Paused Duration', 'Asset Trigger Date', 'Asset Delivery Date',
+    'OnBoarding Done', 'Flag Asset Action', 'Flag OnBoarding Done',
+    'Post OBQ Tags', 'isReadyToDelete'
+];
+
+
+// =================================================================
+// ===== BI-DIRECTIONAL SYNC & WEBHOOK (ADD THIS ENTIRE BLOCK) =====
+// =================================================================
+
+// IMPORTANT: Set a secret key that you will also use in your AppSheet webhook configuration.
+const WEBHOOK_SECRET = "09100910"; // e.g., 'aB1c2D3e4F5g' - Make this unique and private
+
+
+
+
+
+function handleAppSheetBotCall(rowDataJson) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    // The bot will pass a JSON string of the row data
+    const record = JSON.parse(rowDataJson);
+
+    // This is a simplified version of your doPost logic
+    const fileId = SUB_TASK_FILE_ID;
+    const primaryKey = 'Log ID';
+    const recordId = record[primaryKey];
+
+    if (!recordId) {
+      Logger.log(`Bot call received a record without a valid Log ID.`);
+      return; // Stop execution
+    }
+
+    let data = readCSV(fileId);
+    const recordIndex = data.findIndex(row => row[primaryKey] === recordId);
+
+    if (recordIndex > -1) {
+      data[recordIndex] = { ...data[recordIndex], ...record };
+    } else {
+      data.push(record);
+    }
+
+    writeCSV(fileId, data, SUB_TASK_HEADERS);
+    Logger.log(`Successfully synced Log ID ${recordId} from AppSheet Bot.`);
+
+  } catch (err) {
+    Logger.log(`ERROR in handleAppSheetBotCall: ${err.message}`);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+/**
+ * FINAL, ROBUST VERSION: This function acts as the webhook receiver.
+ * It is now designed to correctly parse the official "AppSheet JSON" preset body.
+ */
+function doPost(e) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    // Security Check
+    if (e.parameter.secret !== WEBHOOK_SECRET) {
+      return ContentService.createTextOutput("Error: Invalid secret.").setMimeType(ContentService.MimeType.TEXT);
+    }
+    
+    const postData = JSON.parse(e.postData.contents);
+    
+    // THE FIX: The preset sends the record inside a "Row" property, not "record".
+    const record = postData.Row;
+    const tableName = postData.TableName;
+    
+    let fileId;
+    let primaryKey = 'Log ID';
+    let columnMap;
+
+    switch (tableName) {
+      case 'Sub Task Sheet':
+      case 'Completed_Cases':
+        fileId = SUB_TASK_FILE_ID; columnMap = CASE_COLUMN_MAP; break;
+      case 'Escalation Logs':
+      case 'Completed_Escalation_Logs':
+        fileId = ESCALATION_LOGS_FILE_ID; columnMap = ESCALATION_COLUMN_MAP; break;
+      case 'Pause Logs':
+      case 'Completed_Paus_Logs': // Keeping the typo version just in case
+      case 'Completed_Pause_Logs':
+        fileId = PAUSE_LOGS_FILE_ID; columnMap = PAUSE_COLUMN_MAP; break;
+      default:
+        Logger.log(`Webhook received data for an unknown table: ${tableName}`);
+        return ContentService.createTextOutput(`Error: Unknown table '${tableName}'.`).setMimeType(ContentService.MimeType.TEXT);
+    }
+    
+    // The preset sends raw column names, so we MUST normalize them.
+    const normalizedRecord = _normalizeDataArray([record], columnMap)[0];
+    const recordId = normalizedRecord[primaryKey];
+
+    if (!recordId) {
+      Logger.log(`Webhook for table '${tableName}' received a record without a valid Log ID. Record Data: ${JSON.stringify(record)}`);
+      return ContentService.createTextOutput("Warning: Record had no Log ID.").setMimeType(ContentService.MimeType.TEXT);
+    }
+    
+    let data = readCSV(fileId);
+    const recordIndex = data.findIndex(row => row[primaryKey] === recordId);
+    
+    if (recordIndex > -1) {
+      data[recordIndex] = { ...data[recordIndex], ...normalizedRecord };
+    } else {
+      data.push(normalizedRecord);
+    }
+    
+    // CHANGE: Use the safe writeCSV function with the master headers
+    if (fileId === SUB_TASK_FILE_ID) {
+      writeCSV(fileId, data, SUB_TASK_HEADERS);
+    } else {
+      // For other files, we still use the old method until master headers are defined for them too.
+      // This part is still potentially unsafe for Escalations and Pauses.
+      const headers = data.length > 0 ? Object.keys(data[0]) : [];
+      writeCSV(fileId, data, headers);
+    }
+    
+    return ContentService.createTextOutput("Success").setMimeType(ContentService.MimeType.TEXT);
+
+  } catch (err) {
+    Logger.log(`ERROR in doPost webhook receiver: ${err.message}. Raw data: ${e.postData.contents}`);
+    return ContentService.createTextOutput(`Error: ${err.message}`).setMimeType(ContentService.MimeType.TEXT);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * THIS IS THE UPGRADED MASTER ROUTER FUNCTION
+ * It now handles both adding AND editing completed cases in the AppSheet Database.
+ */
+function _pushUpdateToSource(record, recordType) {
+  const isCompleted = record.Status === 'Completed';
+
+  if (recordType === 'task') {
+    if (isCompleted) {
+      // If a 'Row ID' exists, it means this record came from the database and should be edited.
+      // If it doesn't, it's a new task being completed for the first time and should be added.
+      if (record['Row ID']) {
+        Logger.log(`Pushing 'Edit' for completed task ${record['Log ID']} to AppSheet DB.`);
+        const editPayload = { "Action": "Edit", "Properties": {}, "Rows": [record] };
+        _sendPayloadToAppSheet('Completed_Cases', editPayload);
+      } else {
+        Logger.log(`Pushing 'Add' for newly completed task ${record['Log ID']} to AppSheet DB.`);
+        const addPayload = { "Action": "Add", "Properties": {}, "Rows": [record] };
+        _sendPayloadToAppSheet('Completed_Cases', addPayload);
+        // Only delete from the active sheet when it's a new completion.
+        _deleteRecordFromSheet(ACTIVE_TASKS_SHEET_ID, 'Log ID', record['Log ID']);
+      }
+    } else {
+      // Push updates for active tasks to the Google Sheet
+      Logger.log(`Pushing update for active task ${record['Log ID']} to Google Sheet.`);
+      _updateRecordInSheet(ACTIVE_TASKS_SHEET_ID, 'Log ID', record['Log ID'], record);
+    }
+  } 
+  else if (recordType === 'escalation') {
+      const allTasks = readCSV(SUB_TASK_FILE_ID);
+      const parentTask = allTasks.find(t => t['Case ID'] === record['Related Case ID']);
+      const isCaseCompleted = parentTask && parentTask.Status === 'Completed';
+
+      if (isCaseCompleted) {
+        // If the escalation log has a Row ID, edit it; otherwise, add it.
+        const action = record['Row ID'] ? "Edit" : "Add";
+        const payload = { "Action": action, "Properties": {}, "Rows": [record] };
+        _sendPayloadToAppSheet('Completed_Escalation_Logs', payload);
+        if (action === "Add") {
+          _deleteRecordFromSheet(ACTIVE_ESCALATIONS_SHEET_ID, 'Log ID', record['Log ID']);
+        }
+      } else {
+        _updateRecordInSheet(ACTIVE_ESCALATIONS_SHEET_ID, 'Log ID', record['Log ID'], record);
+      }
+  }
+  else if (recordType === 'pause') {
+      const allTasks = readCSV(SUB_TASK_FILE_ID);
+      const parentTask = allTasks.find(t => t['Case ID'] === record['Related Case ID']);
+      const isCaseCompleted = parentTask && parentTask.Status === 'Completed';
+
+      if (isCaseCompleted) {
+        const action = record['Row ID'] ? "Edit" : "Add";
+        const payload = { "Action": action, "Properties": {}, "Rows": [record] };
+        _sendPayloadToAppSheet('Completed_Pause_Logs', payload);
+        if (action === "Add") {
+          _deleteRecordFromSheet(ACTIVE_PAUSES_SHEET_ID, 'Log ID', record['Log ID']);
+        }
+      } else {
+        _updateRecordInSheet(ACTIVE_PAUSES_SHEET_ID, 'Log ID', record['Log ID'], record);
+      }
+  }
+}
+
+/**
+ * NEW: Generic function to send a payload to an AppSheet API table.
+ */
+function _sendPayloadToAppSheet(tableName, payload) {
+  const apiUrl = `https://api.appsheet.com/api/v2/apps/${APPSHEET_APP_ID}/tables/${tableName}/Action`;
+  const options = {
+    'method': 'post',
+    'contentType': 'application/json',
+    'headers': { 'ApplicationAccessKey': APPSHEET_ACCESS_KEY },
+    'payload': JSON.stringify(payload),
+    'muteHttpExceptions': true
+  };
+  const response = UrlFetchApp.fetch(apiUrl, options);
+  if (response.getResponseCode() !== 200) {
+    Logger.log(`Failed to push payload to AppSheet table ${tableName}. Response: ${response.getContentText()}`);
+  } else {
+    Logger.log(`Successfully pushed payload to AppSheet table ${tableName}.`);
+  }
+}
+
+/**
+ * NEW: Helper to find and update/add a row in a Google Sheet.
+ */
+function _updateRecordInSheet(sheetId, keyColumn, keyValue, newRecordData) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const sheet = SpreadsheetApp.openById(sheetId).getSheets()[0];
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0]; // Header is always the first row
+    const keyIndex = headers.indexOf(keyColumn);
+    if (keyIndex === -1) throw new Error(`Key column '${keyColumn}' not found in sheet.`);
+
+    let rowIndex = -1;
+    for(let i = 1; i < data.length; i++) {
+        if (data[i][keyIndex] == keyValue) {
+            rowIndex = i;
+            break;
+        }
+    }
+    
+    if (rowIndex > -1) {
+      // Row exists, update it
+      const newRow = headers.map(header => newRecordData[header] || '');
+      sheet.getRange(rowIndex + 1, 1, 1, newRow.length).setValues([newRow]);
+    } else {
+      // Row doesn't exist, add it
+      const newRow = headers.map(header => newRecordData[header] || '');
+      sheet.appendRow(newRow);
+    }
+  } catch (e) {
+    Logger.log(`Failed to update record in Google Sheet ${sheetId}: ${e.message}`);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * NEW: Helper to delete a row from a Google Sheet.
+ */
+function _deleteRecordFromSheet(sheetId, keyColumn, keyValue) {
+    const lock = LockService.getScriptLock();
+    lock.waitLock(30000);
+    try {
+        const sheet = SpreadsheetApp.openById(sheetId).getSheets()[0];
+        const data = sheet.getDataRange().getValues();
+        const headers = data.shift();
+        const keyIndex = headers.indexOf(keyColumn);
+        if (keyIndex === -1) return;
+
+        // Find the row index from the bottom up to avoid issues with duplicate entries
+        for (let i = data.length - 1; i >= 0; i--) {
+            if (data[i][keyIndex] == keyValue) {
+                sheet.deleteRow(i + 2); // +2 because of 1-based index and header row
+                return;
+            }
+        }
+    } catch (e) {
+        Logger.log(`Failed to delete record from Google Sheet ${sheetId}: ${e.message}`);
+    } finally {
+        lock.releaseLock();
+    }
+}
+
+// =================================================================
+// WEB APP & HTML SERVICE
+// =================================================================
+
+function doGet(e) {
+  if (e.parameter.page === 'dashboard') {
+    return HtmlService.createTemplateFromFile('Dashboard').evaluate()
+      .setTitle('OBQ Dashboard')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT);
+  }
+  
+  if (e.parameter.page === 'audit') {
+    try {
+      const role = getUserRole(Session.getActiveUser().getEmail());
+      if (role === 'Admin' || role === 'Super Admin') {
+        return HtmlService.createHtmlOutputFromFile('AuditLog')
+          .setTitle('Audit Log & App Health')
+          .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT);
+      } else {
+        return HtmlService.createHtmlOutput("<h1>Access Denied</h1><p>You do not have permission to view this page.</p>")
+          .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT);
+      }
+    } catch (err) {
+      Logger.log("CRITICAL ERROR in doGet for 'audit' page: " + err);
+      return HtmlService.createHtmlOutput('<h1>An Error Occurred</h1><p>Could not load the Audit Log page. Error details: ' + err.message)
+        .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT);
+    }
+  }
+
+  return HtmlService.createHtmlOutputFromFile('Index')
+    .setTitle('OBQ Chrono Application')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT);
+}
+// =================================================================
+// UTILITY FUNCTIONS
+// =================================================================
+
+// Add this function to Code.gs
+function getWebAppUrl() {
+  return ScriptApp.getService().getUrl();
+}
+
+// CHANGE 2: ADD THIS NEW, SAFE writeCSV FUNCTION
+/**
+ * REPLACEMENT FUNCTION: A robust function to write data to a CSV file.
+ * It uses a master list of headers to ensure column order and completeness are always preserved.
+ * @param {string} fileId The Google Drive ID of the CSV file.
+ * @param {Object[]} data An array of data objects to write.
+ * @param {string[]} headers An array of strings representing the exact headers to write.
+ */
+function writeCSV(fileId, data, headers) {
+  try {
+    // If no explicit headers are provided, it's an error. This prevents accidental use.
+    if (!headers || headers.length === 0) {
+      // For non-task files, we temporarily build headers from the data, but this is still not ideal.
+      if (data && data.length > 0) {
+        headers = Object.keys(data[0]);
+      } else {
+        // If there's no data, and no headers, write an empty file.
+        DriveApp.getFileById(fileId).setContent("");
+        return;
+      }
+    }
+
+    // Format the CSV content, starting with the master header row
+    const csvContent = [
+      headers.join(','),
+      ...data.map(row => 
+        headers.map(header => {
+          const value = row[header] === null || row[header] === undefined ? '' : row[header];
+          // Enclose in quotes and escape existing quotes
+          return `"${String(value).replace(/"/g, '""')}"`;
+        }).join(',')
+      )
+    ].join('\n');
+
+    // Overwrite the file with the new, correctly formatted content
+    DriveApp.getFileById(fileId).setContent(csvContent);
+
+  } catch (e) {
+    Logger.log(`CRITICAL ERROR writing to CSV with ID ${fileId}: ${e.message}`);
+  }
+}
+
+
+// =================================================================
+// ROLE & PERMISSIONS
+// =================================================================
+function getUserRole(email) {
+  try {
+    if (!email) {
+      Logger.log("getUserRole: No email provided, returning 'User'.");
+      return 'User';
+    }
+
+    const users = readCSV(USERS_FILE_ID);
+    
+    // Safely handle if the Users.csv file is empty or unreadable
+    if (!users || users.length === 0) {
+      Logger.log("getUserRole WARNING: Users.csv file is empty or could not be read. Returning 'User' for safety.");
+      // Failsafe: If the current user is the script owner, grant them Super Admin to prevent lock-out.
+      if (email === Session.getScriptOwner().getEmail()) {
+          Logger.log("getUserRole: User is the script owner. Granting 'Super Admin' role as a failsafe.");
+          return 'Super Admin';
+      }
+      return 'User';
+    }
+
+    // Make the email check case-insensitive for reliability
+    const user = users.find(u => u.Email && u.Email.toLowerCase() === email.toLowerCase());
+    
+    if (user && user.Role) {
+      return user.Role;
+    } else {
+      Logger.log("getUserRole: Email '" + email + "' not found in Users.csv. Assigning default 'User' role.");
+      return 'User';
+    }
+  } catch (err) {
+    Logger.log("CRITICAL ERROR in getUserRole(): " + err.message + ". Returning 'User' for safety.");
+    // Failsafe for the script owner even if there's a critical error
+    if (email === Session.getScriptOwner().getEmail()) {
+       Logger.log("getUserRole (in catch): User is the script owner. Granting 'Super Admin' role as a failsafe.");
+       return 'Super Admin';
+    }
+    return 'User';
+  }
+}
+
+// =================================================================
+// MAIN APP ENDPOINTS (Task Manager)
+// =================================================================
+
+function getAppContext() {
+  const currentUserEmail = Session.getActiveUser().getEmail();
+  const currentUserRole = getUserRole(currentUserEmail);
+  return { email: currentUserEmail, role: currentUserRole };
+}
+
+function getUserTasks(options) {
+  const currentUser = Session.getActiveUser().getEmail();
+  let allTasks = readCSV(SUB_TASK_FILE_ID);
+  
+  // Initial filter for the current user
+  let myTasks = allTasks.filter(task => task['User'] === currentUser);
+  
+  const statusFilter = options && options.statusFilter ? options.statusFilter : 'All';
+  const taskTypeFilter = options && options.taskTypeFilter ? options.taskTypeFilter : 'All';
+
+  // MODIFIED: Handle derived statuses "Escalated" and "Paused"
+  if (statusFilter === 'Escalated') {
+    const escalations = readCSV(ESCALATION_LOGS_FILE_ID);
+    const activeEscalationCaseIds = new Set(
+      escalations.filter(e => !e['Escalation End Time']).map(e => e['Related Case ID'])
+    );
+    myTasks = myTasks.filter(task => task['Status'] === 'InProgress' && activeEscalationCaseIds.has(task['Case ID']));
+  } else if (statusFilter === 'Paused') {
+    const pauses = readCSV(PAUSE_LOGS_FILE_ID);
+    const activePauseCaseIds = new Set(
+      pauses.filter(p => !p['Pause End Time']).map(p => p['Related Case ID'])
+    );
+    myTasks = myTasks.filter(task => task['Status'] === 'InProgress' && activePauseCaseIds.has(task['Case ID']));
+  } else if (statusFilter !== 'All') { 
+    myTasks = myTasks.filter(task => task['Status'] === statusFilter); 
+  }
+
+  if (taskTypeFilter !== 'All') { myTasks = myTasks.filter(task => task['Task type'] === taskTypeFilter); }
+
+  const statusOrder = { 'InProgress': 1, 'Completed': 2 };
+
+  myTasks.sort((a, b) => {
+    const orderA = statusOrder[a['Status']] || 99;
+    const orderB = statusOrder[b['Status']] || 99;
+    if (orderA !== orderB) {
+      return orderA - orderB;
+    }
+    return new Date(b['Start Timestamp']) - new Date(a['Start Timestamp']);
+  });
+  
+  return { success: true, data: calculateAllSLA(myTasks) };
+}
+
+function getAllTasks(options) {
+  const role = getUserRole(Session.getActiveUser().getEmail());
+  if (role !== 'Admin' && role !== 'Super Admin') {
+    return { success: false, message: "Access Denied." };
+  }
+  try {
+    const page = options.page || 1;
+    const searchTerm = options.searchTerm || '';
+    const statusFilter = options.statusFilter || 'All';
+    const taskTypeFilter = options.taskTypeFilter || 'All';
+    const pageSize = 100;
+    
+    let allTasks = readCSV(SUB_TASK_FILE_ID);
+    
+    if (searchTerm) { allTasks = allTasks.filter(task => task['Case ID'] && task['Case ID'].includes(searchTerm)); }
+
+    // MODIFIED: Handle derived statuses "Escalated" and "Paused"
+    if (statusFilter === 'Escalated') {
+      const escalations = readCSV(ESCALATION_LOGS_FILE_ID);
+      const activeEscalationCaseIds = new Set(
+        escalations.filter(e => !e['Escalation End Time']).map(e => e['Related Case ID'])
+      );
+      allTasks = allTasks.filter(task => task['Status'] === 'InProgress' && activeEscalationCaseIds.has(task['Case ID']));
+    } else if (statusFilter === 'Paused') {
+      const pauses = readCSV(PAUSE_LOGS_FILE_ID);
+      const activePauseCaseIds = new Set(
+        pauses.filter(p => !p['Pause End Time']).map(p => p['Related Case ID'])
+      );
+      allTasks = allTasks.filter(task => task['Status'] === 'InProgress' && activePauseCaseIds.has(task['Case ID']));
+    } else if (statusFilter !== 'All') {
+      allTasks = allTasks.filter(task => task['Status'] === statusFilter);
+    }
+    
+    if (taskTypeFilter !== 'All') { allTasks = allTasks.filter(task => task['Task type'] === taskTypeFilter); }
+    
+    const statusOrder = { 'InProgress': 1, 'Completed': 2 };
+
+    allTasks.sort((a, b) => {
+      const orderA = statusOrder[a['Status']] || 99;
+      const orderB = statusOrder[b['Status']] || 99;
+      if (orderA !== orderB) {
+        return orderA - orderB;
+      }
+      return new Date(b['Start Timestamp']) - new Date(a['Start Timestamp']);
+    });
+    
+    const totalPages = Math.ceil(allTasks.length / pageSize);
+    const startIndex = (page - 1) * pageSize;
+    const paginatedTasks = allTasks.slice(startIndex, startIndex + pageSize);
+    const tasksWithDetails = calculateAllSLA(paginatedTasks);
+    
+    return { success: true, data: tasksWithDetails, totalPages: totalPages, currentPage: page };
+  } catch (e) {
+    return { success: false, message: 'Failed to load tasks. Error: ' + e.toString() };
+  }
+}
+
+function getCaseTasks(caseId) {
+  try {
+    const allTasks = readCSV(SUB_TASK_FILE_ID);
+    const caseTasks = allTasks.filter(task => task['Case ID'] === caseId);
+    if (caseTasks.length === 0) {
+      return { success: true, data: [] };
+    }
+    const tasksWithDetails = calculateAllSLA(caseTasks);
+    return { success: true, data: tasksWithDetails };
+  } catch (e) {
+    return { success: false, message: 'Failed to retrieve case data. Error: ' + e.toString() };
+  }
+}
+
+function createNewTask(taskData) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const now = new Date();
+    // FIX 2: Use Utilities.formatDate for correct timezone and format.
+    const formattedTimestamp = Utilities.formatDate(now, TIMEZONE, "MM/dd/yyyy HH:mm:ss");
+    const formattedDate = Utilities.formatDate(now, TIMEZONE, "MM/dd/yyyy");
+
+    const newTask = {
+      'Log ID': `LOG-${now.getTime()}-${Math.floor(Math.random() * 1000)}`,
+      'Date': formattedDate, // FIX 3: ADDED THE MISSING DATE FIELD
+      'Case ID': taskData.caseId,
+      'User': Session.getActiveUser().getEmail(),
+      'Market': taskData.market,
+      'Task type': taskData.taskType,
+      'Status': 'InProgress',
+      'Case Created': formattedTimestamp, // Using formatted timestamp
+      'Start Timestamp': formattedTimestamp, // Using formatted timestamp
+      'End Timestamp': '',
+      'Escalation Reasons': '',
+      'Comments': taskData.comments,
+      'Asset Triggered Timestamp': '',
+      'Asset Delivered Timestamp': '',
+      'OnBoarding Done Timestamp': ''
+    };
+    const tasks = readCSV(SUB_TASK_FILE_ID);
+    tasks.push(newTask);
+    writeCSV(SUB_TASK_FILE_ID, tasks, SUB_TASK_HEADERS);
+
+    // PUSH LOGIC
+    _pushUpdateToSource(newTask, 'task');
+    
+    createAuditLog({
+        action: 'Create Task',
+        caseId: taskData.caseId,
+        targetId: newTask['Log ID'],
+        details: `Created new task of type '${taskData.taskType}'.`
+    });
+
+    return { success: true, message: 'New task created successfully!' };
+  } catch (e) {
+    return { success: false, message: 'Failed to create task. Error: ' + e.toString() };
+  }
+  finally {
+    lock.releaseLock();
+  }
+}
+
+function endTask(logId) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    let tasks = readCSV(SUB_TASK_FILE_ID);
+    const taskToEnd = tasks.find(task => task['Log ID'] === logId);
+
+    if (!taskToEnd) {
+      throw new Error("Task with Log ID not found.");
+    }
+
+    taskToEnd['Status'] = 'Completed';
+    // FIX: Use correct format and timezone for End Timestamp
+    taskToEnd['End Timestamp'] = Utilities.formatDate(new Date(), TIMEZONE, "MM/dd/yyyy HH:mm:ss");
+    
+    writeCSV(SUB_TASK_FILE_ID, tasks, SUB_TASK_HEADERS);
+
+    // PUSH LOGIC
+    _pushUpdateToSource(taskToEnd, 'task');
+
+    createAuditLog({
+        action: 'End Task',
+        caseId: taskToEnd['Case ID'],
+        targetId: logId,
+        details: 'Set task status to "Completed".'
+    });
+
+    return { success: true, message: "Task completed successfully." };
+  } catch (e) { 
+    return { success: false, message: e.toString() }; 
+  } finally { 
+    lock.releaseLock(); 
+  }
+}
+
+function deleteTask(logId, caseId, taskType) {
+  const role = getUserRole(Session.getActiveUser().getEmail());
+  if (role !== 'Admin' && role !== 'Super Admin') {
+    return { success: false, message: "Access Denied." };
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    // --- 1. Find the Main Task and its status BEFORE deleting ---
+    let tasks = readCSV(SUB_TASK_FILE_ID);
+    const taskToDelete = tasks.find(t => t['Log ID'] === logId);
+    if (!taskToDelete) {
+      throw new Error("Task not found.");
+    }
+    const wasCompleted = taskToDelete.Status === 'Completed';
+
+    // --- 2. Delete the Main Task from CSV and Backend ---
+    const updatedTasks = tasks.filter(task => task['Log ID'] !== logId);
+    // CHANGE 5: Update this call to use the master headers.
+    writeCSV(SUB_TASK_FILE_ID, updatedTasks, SUB_TASK_HEADERS);
+
+    if (wasCompleted) {
+      _sendPayloadToAppSheet('Completed_Cases', { "Action": "Delete", "Rows": [{'Log id': logId}] });
+    } else {
+      _deleteRecordFromSheet(ACTIVE_TASKS_SHEET_ID, 'Log ID', logId);
+    }
+    Logger.log(`Deleted task with Log ID: ${logId} from CSV and backend.`);
+
+    // ================== THE FIX IS HERE ==================
+    // --- 3. Find, Delete, and Push Deletions for Related Logs ---
+    let escLogsCleaned = 0;
+    let escalations = readCSV(ESCALATION_LOGS_FILE_ID);
+    const escalationsToDelete = escalations.filter(log => log['Related Case ID'] === caseId && log['Task Type'] === taskType);
+    if (escalationsToDelete.length > 0) {
+      const updatedEscalations = escalations.filter(log => !(log['Related Case ID'] === caseId && log['Task Type'] === taskType));
+      // This write is still potentially unsafe as we haven't defined master headers for it.
+      writeCSV(ESCALATION_LOGS_FILE_ID, updatedEscalations);
+      escLogsCleaned = escalationsToDelete.length;
+
+      // Push the deletion to the correct backend for each log
+      escalationsToDelete.forEach(log => {
+        if (wasCompleted) {
+          _sendPayloadToAppSheet('Completed_Escalation_Logs', { "Action": "Delete", "Rows": [{'Log id': log['Log ID']}] });
+        } else {
+          _deleteRecordFromSheet(ACTIVE_ESCALATIONS_SHEET_ID, 'Log ID', log['Log ID']);
+        }
+      });
+      Logger.log(`Cleaned and pushed deletions for ${escLogsCleaned} escalation logs.`);
+    }
+
+    let pauseLogsCleaned = 0;
+    const remainingTasksForCase = updatedTasks.filter(task => task['Case ID'] === caseId);
+    if (remainingTasksForCase.length === 0) {
+      let pauses = readCSV(PAUSE_LOGS_FILE_ID);
+      const pausesToDelete = pauses.filter(log => log['Related Case ID'] === caseId);
+      if (pausesToDelete.length > 0) {
+        const updatedPauses = pauses.filter(log => log['Related Case ID'] !== caseId);
+        // This write is still potentially unsafe as we haven't defined master headers for it.
+        writeCSV(PAUSE_LOGS_FILE_ID, updatedPauses);
+        pauseLogsCleaned = pausesToDelete.length;
+
+        // Push the deletion to the correct backend for each log
+        pausesToDelete.forEach(log => {
+          if (wasCompleted) {
+             _sendPayloadToAppSheet('Completed_Pause_Logs', { "Action": "Delete", "Rows": [{'Log id': log['Log ID']}] });
+          } else {
+             _deleteRecordFromSheet(ACTIVE_PAUSES_SHEET_ID, 'Log ID', log['Log ID']);
+          }
+        });
+        Logger.log(`Cleaned and pushed deletions for ${pauseLogsCleaned} pause logs.`);
+      }
+    }
+    // =====================================================
+
+    const auditDetails = `Deleted task. Cleaned up ${escLogsCleaned} escalation log(s) and ${pauseLogsCleaned} pause log(s) for Task Type: ${taskType}.`;
+    createAuditLog({ action: 'Delete Task', caseId: caseId, targetId: logId, details: auditDetails });
+
+    return { success: true, message: `Task ${logId} and its related logs have been deleted.` };
+  } catch (e) {
+    return { success: false, message: 'Failed to delete task. Error: ' + e.toString() };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function getUsersAndRoles() {
+  const role = getUserRole(Session.getActiveUser().getEmail());
+  if (role !== 'Super Admin') { return { success: false, message: "Access Denied." }; }
+  const users = readCSV(USERS_FILE_ID);
+  return { success: true, data: users };
+}
+
+function updateUserRole(userData) {
+  const currentUserEmail = Session.getActiveUser().getEmail();
+  const currentUserRole = getUserRole(currentUserEmail);
+
+  if (currentUserRole === 'User') {
+    return { success: false, message: "Access Denied. You do not have permission to modify user roles." };
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    let users = readCSV(USERS_FILE_ID);
+    const targetUser = users.find(u => u.Email === userData.email);
+    const targetUserRole = targetUser ? targetUser.Role : null;
+
+    // Rule: An Admin cannot modify a Super Admin
+    if (currentUserRole === 'Admin' && targetUserRole === 'Super Admin') {
+      return { success: false, message: "Admins cannot modify the roles of Super Admins." };
+    }
+    
+    // Rule: An Admin cannot assign the Super Admin role
+    if (currentUserRole === 'Admin' && userData.role === 'Super Admin') {
+      return { success: false, message: "Admins cannot create new Super Admins." };
+    }
+
+    const userIndex = users.findIndex(u => u.Email === userData.email);
+    if (userIndex > -1) { 
+      // Prevent a Super Admin from accidentally demoting themselves if they are the last one
+      if (users[userIndex].Role === 'Super Admin' && userData.role !== 'Super Admin') {
+        const superAdminCount = users.filter(u => u.Role === 'Super Admin').length;
+        if (superAdminCount <= 1) {
+          return { success: false, message: "Cannot change the role of the last Super Admin." };
+        }
+      }
+      users[userIndex].Role = userData.role; 
+    }
+    else { users.push({ Email: userData.email, Role: userData.role }); }
+    
+    // This is writing to the USERS file, so no SUB_TASK_HEADERS are needed.
+    writeCSV(USERS_FILE_ID, users);
+    return { success: true, message: `User ${userData.email} has been saved.` };
+  } catch (e) { 
+    return { success: false, message: 'Failed to save user. Error: ' + e.toString() }; 
+  }
+  finally { lock.releaseLock(); }
+}
+
+
+function deleteUser(emailToDelete) {
+  const currentUserEmail = Session.getActiveUser().getEmail();
+  const currentUserRole = getUserRole(currentUserEmail);
+
+  if (currentUserRole === 'User') {
+    return { success: false, message: "Access Denied. You do not have permission to delete users." };
+  }
+
+  if (currentUserEmail === emailToDelete) {
+    return { success: false, message: "You cannot delete your own account." };
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    let users = readCSV(USERS_FILE_ID);
+    const targetUser = users.find(u => u.Email === emailToDelete);
+
+    if (!targetUser) {
+      return { success: false, message: "User not found." };
+    }
+
+    // Rule: An Admin cannot delete a Super Admin
+    if (currentUserRole === 'Admin' && targetUser.Role === 'Super Admin') {
+      return { success: false, message: "Admins cannot delete Super Admins." };
+    }
+
+    const updatedUsers = users.filter(u => u.Email !== emailToDelete);
+    // This is writing to the USERS file, so no SUB_TASK_HEADERS are needed.
+    writeCSV(USERS_FILE_ID, updatedUsers);
+    return { success: true, message: `User ${emailToDelete} has been deleted.` };
+  } catch (e) {
+    return { success: false, message: 'Failed to delete user. Error: ' + e.toString() };
+  }
+  finally { lock.releaseLock(); }
+}
+
+
+
+function bulkImportData(csvContent, importType) {
+  const role = getUserRole(Session.getActiveUser().getEmail());
+  if (role !== 'Super Admin') { return { success: false, message: "Access Denied." }; }
+  try {
+    let destinationFileId; const primaryKey = 'Log ID';
+    switch (importType) {
+      case 'tasks': destinationFileId = SUB_TASK_FILE_ID; break;
+      case 'escalations': destinationFileId = ESCALATION_LOGS_FILE_ID; break;
+      case 'pauses': destinationFileId = PAUSE_LOGS_FILE_ID; break;
+      default: return { success: false, message: "Invalid import type specified." };
+    }
+    const newDataArray = Utilities.parseCsv(csvContent);
+    if (newDataArray.length < 2) { return { success: false, message: "Import failed: CSV has no data rows." }; }
+    const headers = newDataArray.shift().map(h => h.trim()); 
+    const cleanHeaderMap = { 'Task Type': 'Task type', 'log id': 'Log ID', 'Log Id': 'Log ID', 'case id': 'Case ID', 'Case Id': 'Case ID', 'related case id': 'Related Case ID', 'Related Case Id': 'Related Case ID' };
+    const sanitizedHeaders = headers.map(h => cleanHeaderMap[h] || h);
+    const newData = newDataArray.map(row => { let obj = {}; sanitizedHeaders.forEach((header, index) => { obj[header] = row[index]; }); return obj; });
+    const lock = LockService.getScriptLock();
+    lock.waitLock(30000);
+    try {
+      const existingData = readCSV(destinationFileId);
+      const existingIds = new Set(existingData.map(d => d[primaryKey]));
+      const dataToImport = newData.filter(d => d[primaryKey] && !existingIds.has(d[primaryKey]));
+      if (dataToImport.length === 0) { return { success: true, message: "Import complete. No new records were found to add." }; }
+      const combinedData = existingData.concat(dataToImport);
+      // CHANGE 6: Conditionally use the master headers for the sub-task sheet.
+      if (destinationFileId === SUB_TASK_FILE_ID) {
+        writeCSV(destinationFileId, combinedData, SUB_TASK_HEADERS);
+      } else {
+        writeCSV(destinationFileId, combinedData); // Still unsafe for other types
+      }
+      return { success: true, message: `Import successful! Added ${dataToImport.length} new records.` };
+    } finally {
+      lock.releaseLock();
+    }
+  } catch (e) { return { success: false, message: 'Import failed. Check CSV format. Error: ' + e.toString() }; }
+}
+
+function resetAllTaskData() {
+  const role = getUserRole(Session.getActiveUser().getEmail());
+  if (role !== 'Super Admin') {
+    return { success: false, message: "Access Denied. You do not have permission to reset data." };
+  }
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    // CHANGE 7: Update these calls to use the master headers (or empty headers).
+    // The new writeCSV will correctly write just the header row if data is empty.
+    writeCSV(SUB_TASK_FILE_ID, [], SUB_TASK_HEADERS);
+    writeCSV(ESCALATION_LOGS_FILE_ID, []);
+    writeCSV(PAUSE_LOGS_FILE_ID, []);
+    return { success: true, message: "All task, escalation, and pause log data has been successfully reset." };
+  } catch (e) {
+    console.error('resetAllTaskData Error: ' + e.toString());
+    return { success: false, message: 'Failed to reset data. Error: ' + e.toString() };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// REPLACE your old setFlagTimestamp function with this corrected version
+
+// REPLACE your old setFlagTimestamp function with this corrected version
+
+function setFlagTimestamp(caseId, flagType) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    let allTasks = readCSV(SUB_TASK_FILE_ID);
+    // FIX 1: Ensure the correct, full date-time format is always used.
+    const timestamp = Utilities.formatDate(new Date(), TIMEZONE, "MM/dd/yyyy HH:mm:ss");
+    let updatedTasks = [];
+
+    allTasks.forEach(task => {
+      if (task['Case ID'] === caseId) {
+        let wasUpdated = false;
+
+        // --- THE CORRECTED LOGIC ---
+
+        // Case 1: "Asset Triggered" button is clicked
+        if (flagType === 'Asset Triggered Timestamp') {
+          // Update the primary date column with the full timestamp
+          if (task['Asset Trigger Date'] !== timestamp) {
+            task['Asset Trigger Date'] = timestamp;
+            wasUpdated = true;
+          }
+          // Also update the secondary flag column with the full timestamp
+          if (task['Flag Asset Action'] !== timestamp) {
+            task['Flag Asset Action'] = timestamp;
+            wasUpdated = true;
+          }
+        } 
+        
+        // Case 2: "Asset Delivered" button is clicked
+        else if (flagType === 'Asset Delivered Timestamp') {
+          // Update the single primary date column with the full timestamp
+          if (task['Asset Delivery Date'] !== timestamp) {
+             task['Asset Delivery Date'] = timestamp;
+             wasUpdated = true;
+          }
+        }
+
+        // Case 3: "OnBoarding Done" button is clicked
+        else if (flagType === 'OnBoarding Done Timestamp') {
+          // Update the primary date column with the full timestamp
+          if (task['OnBoarding Done'] !== timestamp) {
+            task['OnBoarding Done'] = timestamp;
+            wasUpdated = true;
+          }
+          // Also update the secondary flag column with the full timestamp
+          if (task['Flag OnBoarding Done'] !== timestamp) {
+            task['Flag OnBoarding Done'] = timestamp;
+            wasUpdated = true;
+          }
+        }
+
+        // If any part of the task was updated, add it to our list for syncing.
+        if (wasUpdated) {
+          if (!updatedTasks.some(updated => updated['Log ID'] === task['Log ID'])) {
+            updatedTasks.push(task);
+          }
+        }
+      }
+    });
+
+    if (updatedTasks.length > 0) {
+      // Save all changes to the CSV file.
+      writeCSV(SUB_TASK_FILE_ID, allTasks, SUB_TASK_HEADERS);
+      
+      // Sync only the changed tasks to the Google Sheet.
+      Logger.log(`Pushing flag update for ${updatedTasks.length} tasks in Case ID ${caseId}...`);
+      updatedTasks.forEach(task => {
+        _pushUpdateToSource(task, 'task'); 
+      });
+
+      return { success: true, message: `Flag '${flagType}' has been timestamped for Case ${caseId}.` };
+    } else {
+      return { success: true, message: `Flag '${flagType}' was already set for Case ${caseId}.` };
+    }
+  } catch(e) {
+    return { success: false, message: 'Failed to set flag. Error: ' + e.toString() };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function updateTimestamps(payload) {
+  const role = getUserRole(Session.getActiveUser().getEmail());
+  if (role !== 'Admin' && role !== 'Super Admin') {
+    return { success: false, message: "Access Denied." };
+  }
+ 
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const user = Session.getActiveUser().getEmail();
+    let allTasks = readCSV(SUB_TASK_FILE_ID);
+    let allEscalations = readCSV(ESCALATION_LOGS_FILE_ID);
+    let allPauses = readCSV(PAUSE_LOGS_FILE_ID);
+    
+    payload.forEach(update => {
+      let logDetails = '';
+      let caseIdForLog = 'N/A';
+      let recordToPush = null;
+      let recordType = '';
+
+      switch (update.type) {
+        case 'task':
+          const taskToUpdate = allTasks.find(t => t['Log ID'] === update.id);
+          if (taskToUpdate) {
+            logDetails = Object.keys(update.data).map(key => `Changed '${key}' from "${taskToUpdate[key] || ''}" to "${update.data[key] || ''}"`).join('; ');
+            caseIdForLog = taskToUpdate['Case ID'];
+            Object.assign(taskToUpdate, update.data);
+            recordToPush = taskToUpdate;
+            recordType = 'task';
+            createAuditLog({ user, action: 'Update Timestamps', caseId: caseIdForLog, targetId: update.id, details: logDetails });
+          }
+          break;
+        
+        case 'case_flag':
+            allTasks.forEach(task => { 
+                if (task['Case ID'] === update.id) { 
+                    Object.assign(task, update.data); 
+                    _pushUpdateToSource(task, 'task');
+                } 
+            });
+            break;
+
+        case 'escalation':
+          const escToUpdate = allEscalations.find(e => e['Log ID'] === update.id);
+          if (escToUpdate) {
+            logDetails = Object.keys(update.data).map(key => `Changed '${key}' from "${escToUpdate[key] || ''}" to "${update.data[key] || ''}"`).join('; ');
+            caseIdForLog = escToUpdate['Related Case ID'];
+            Object.assign(escToUpdate, update.data);
+            recordToPush = escToUpdate;
+            recordType = 'escalation';
+            createAuditLog({ user, action: 'Update Timestamps', caseId: caseIdForLog, targetId: update.id, details: logDetails });
+          }
+          break;
+
+        case 'pause':
+          const pauseToUpdate = allPauses.find(p => p['Log ID'] === update.id);
+          if (pauseToUpdate) {
+            logDetails = Object.keys(update.data).map(key => `Changed '${key}' from "${pauseToUpdate[key] || ''}" to "${update.data[key] || ''}"`).join('; ');
+            caseIdForLog = pauseToUpdate['Related Case ID'];
+            Object.assign(pauseToUpdate, update.data);
+            recordToPush = pauseToUpdate;
+            recordType = 'pause';
+            createAuditLog({ user, action: 'Update Timestamps', caseId: caseIdForLog, targetId: update.id, details: logDetails });
+          }
+          break;
+      }
+
+      // PUSH LOGIC for single record updates
+      if (recordToPush && recordType) {
+          _pushUpdateToSource(recordToPush, recordType);
+      }
+    });
+    
+    // CHANGE 9: Update this call to use the master headers.
+    writeCSV(SUB_TASK_FILE_ID, allTasks, SUB_TASK_HEADERS);
+    writeCSV(ESCALATION_LOGS_FILE_ID, allEscalations);
+    writeCSV(PAUSE_LOGS_FILE_ID, allPauses);
+    
+    return { success: true, message: 'Timestamps updated successfully.' };
+  } catch (e) {
+    return { success: false, message: 'Failed to update timestamps. Error: ' + e.toString() };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function startEscalation(caseId, reasons) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    // Fetch parent task details to get Market and Task Type
+    const allTasks = readCSV(SUB_TASK_FILE_ID);
+    const parentTask = allTasks.find(t => t['Case ID'] === caseId && t.Status === 'InProgress');
+    if (!parentTask) {
+        throw new Error(`Could not find an active task for Case ID ${caseId} to start an escalation.`);
+    }
+
+    const escalations = readCSV(ESCALATION_LOGS_FILE_ID);
+    const now = new Date();
+    
+    const newLog = {
+      'Log ID': `ESC-${now.getTime()}-${Math.floor(Math.random() * 1000)}`,
+      'Related Case ID': caseId,
+      'Market': parentTask.Market,
+      'Task Type': parentTask['Task type'],
+      'Escalation Start Time': Utilities.formatDate(now, TIMEZONE, "MM/dd/yyyy HH:mm:ss"),
+      'Escalation End Time': '',
+      // --- THIS IS THE CHANGE ---
+      // The function now accepts a 'reasons' argument and saves it to the 'Escalation Reasons' column.
+      'Escalation Reasons': reasons || '' 
+    };
+
+    escalations.push(newLog);
+    
+    // For best practice, you should define an ESCALATION_LOGS_HEADERS constant in code.gs
+    // and pass it here to ensure a safe write, just like you do for SUB_TASK_HEADERS.
+    writeCSV(ESCALATION_LOGS_FILE_ID, escalations);
+
+    // PUSH LOGIC
+    _pushUpdateToSource(newLog, 'escalation');
+
+    return { success: true, message: `Case ${caseId} has been escalated.` };
+  } catch (e) {
+    return { success: false, message: 'Failed to start escalation. Error: ' + e.toString() };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function stopEscalation(caseId) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const escalations = readCSV(ESCALATION_LOGS_FILE_ID);
+    const activeEscalation = escalations.slice().reverse().find(e => e['Related Case ID'] === caseId && !e['Escalation End Time']);
+    if (activeEscalation) {
+      activeEscalation['Escalation End Time'] = Utilities.formatDate(new Date(), TIMEZONE, "MM/dd/yyyy HH:mm:ss"); // FIXED FORMAT
+      writeCSV(ESCALATION_LOGS_FILE_ID, escalations);
+      
+      _pushUpdateToSource(activeEscalation, 'escalation');
+
+      return { success: true, message: `Escalation for case ${caseId} has been stopped.` };
+    } else {
+      return { success: false, message: `No active escalation found for case ${caseId}.` };
+    }
+  } catch (e) {
+    return { success: false, message: 'Failed to stop escalation. Error: ' + e.toString() };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function startPause(caseId) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    // FIX 5: Fetch parent task details to get Market and Task Type
+    const allTasks = readCSV(SUB_TASK_FILE_ID);
+    const parentTask = allTasks.find(t => t['Case ID'] === caseId && t.Status === 'InProgress');
+     if (!parentTask) {
+        throw new Error(`Could not find an active task for Case ID ${caseId} to start a pause.`);
+    }
+
+    const pauses = readCSV(PAUSE_LOGS_FILE_ID);
+    const now = new Date();
+    const newLog = {
+      'Log ID': `PAUSE-${now.getTime()}-${Math.floor(Math.random() * 1000)}`,
+      'Related Case ID': caseId,
+      'Market': parentTask.Market, // ADDED
+      'Task type': parentTask['Task type'], // ADDED
+      'Pause Start Time': Utilities.formatDate(now, TIMEZONE, "MM/dd/yyyy HH:mm:ss"), // FIXED FORMAT
+      'Pause End Time': ''
+    };
+    pauses.push(newLog);
+    // This write is still potentially unsafe as we haven't defined master headers for it.
+    writeCSV(PAUSE_LOGS_FILE_ID, pauses);
+
+    // PUSH LOGIC
+    _pushUpdateToSource(newLog, 'pause');
+
+    return { success: true, message: `Case ${caseId} has been paused.` };
+  } catch (e) {
+    return { success: false, message: 'Failed to start pause. Error: ' + e.toString() };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function stopPause(caseId) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const pauses = readCSV(PAUSE_LOGS_FILE_ID);
+    const activePause = pauses.slice().reverse().find(p => p['Related Case ID'] === caseId && !p['Pause End Time']);
+    if (activePause) {
+      activePause['Pause End Time'] = Utilities.formatDate(new Date(), TIMEZONE, "MM/dd/yyyy HH:mm:ss"); // FIXED FORMAT
+      writeCSV(PAUSE_LOGS_FILE_ID, pauses);
+
+      _pushUpdateToSource(activePause, 'pause');
+
+      return { success: true, message: `Pause for case ${caseId} has been stopped.` };
+    } else {
+      return { success: false, message: `No active pause found for case ${caseId}.` };
+    }
+  } catch (e) {
+    return { success: false, message: 'Failed to stop pause. Error: ' + e.toString() };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// =================================================================
+// SLA CALCULATION
+// =================================================================
+function calculateAllSLA(tasks) {
+  const escalations = readCSV(ESCALATION_LOGS_FILE_ID);
+  const pauses = readCSV(PAUSE_LOGS_FILE_ID);
+  return tasks.map(task => {
+    const processedTask = {...task};
+    processedTask.EscalationLogs = escalations.filter(e => e['Related Case ID'] === processedTask['Case ID']);
+    processedTask.PauseLogs = pauses.filter(p => p['Related Case ID'] === processedTask['Case ID']);
+    processedTask.TotalEscalationHours = processedTask.EscalationLogs.reduce((total, log) => {
+        if (log['Escalation Start Time'] && log['Escalation End Time']) {
+            const start = new Date(log['Escalation Start Time']);
+            const end = new Date(log['Escalation End Time']);
+            if (end > start) return total + ((end - start) / 3600000);
+        }
+        return total;
+    }, 0);
+    processedTask.TotalPauseHours = processedTask.PauseLogs.reduce((total, log) => {
+        if (log['Pause Start Time'] && log['Pause End Time']) {
+            const start = new Date(log['Pause Start Time']);
+            const end = new Date(log['Pause End Time']);
+            if (end > start) return total + ((end - start) / 3600000);
+        }
+        return total;
+    }, 0);
+    const start = new Date(processedTask['Start Timestamp']);
+    const end = processedTask['End Timestamp'] ? new Date(processedTask['End Timestamp']) : new Date();
+    const grossHours = (end - start) / 3600000;
+    processedTask.SLA_Real_Elapsed_Time = grossHours - processedTask.TotalEscalationHours - processedTask.TotalPauseHours;
+    const slaDeadlines = { "Onboarding Qualify": 24, "Admin Creation": 0.10, "Menu Creation": 24, "Asset Delivery": 72, "Integration": 144, "Post OBQ": 24 };
+    const deadline = slaDeadlines[processedTask['Task type']] || 24;
+    const remainingHours = deadline - processedTask.SLA_Real_Elapsed_Time;
+    processedTask.SLA_Time_Display = remainingHours;
+    processedTask.SLA_Status = getSLAStatus(processedTask);
+    return processedTask;
+  });
+}
+
+function getSLAStatus(task) {
+  const slaDeadlines = { "Onboarding Qualify": 24, "Admin Creation": 0.10, "Menu Creation": 24, "Asset Delivery": 72, "Integration": 144, "Post OBQ": 24 };
+  const deadline = slaDeadlines[task['Task type']] || 24;
+  if (task.Status === "Completed") { return task.SLA_Real_Elapsed_Time <= deadline ? "Met SLA ✅" : "Total Overdue SLA ❌"; }
+  else {
+    const elapsed = task.SLA_Real_Elapsed_Time;
+    if (elapsed >= deadline) return "Overdue ⏰"; if (elapsed >= deadline * 0.85) return "Critical 🔴";
+    if (elapsed >= deadline * 0.65) return "High 🟠"; if (elapsed >= deadline * 0.35) return "Medium 🟡";
+    return "Low 🟢";
+  }
+}
+
+// =================================================================================== //
+// ==========                                DASHBOARD FUNCTIONS (Corrected & Final)                                 ========== //
+// =================================================================================== //
+
+const DASHBOARD_SLA_HOURS = { "Onboarding Qualify": 24, "Admin Creation": 0.10, "Menu Creation": 24, "Asset Delivery": 72, "Integration": 144, "default": 24 };
+
+/**
+ * Retrieves all data for the dashboard, including KPIs and utilization metrics.
+ * FINAL VERSION: This is a complete replacement that perfectly replicates the complex logic
+ * of the original Google Sheets dashboard to ensure all KPI numbers match.
+ */
+// COMPLETE, CORRECTED FUNCTION TO REPLACE YOUR OLD ONE //
+
+// COMPLETE, CORRECTED FUNCTION TO REPLACE YOUR OLD ONE //
+
+// ==============================================================================
+// COMPLETE AND FINAL VERSION FOR Code.gs
+// This function is now streamlined for a fast initial load. All complex
+// utilization logic has been moved to the getUtilizationDataWithQuarantine function.
+// ==============================================================================
+
+// COMPLETE, SIMPLIFIED FUNCTION (KPIs and Main Table Only)
+// COMPLETE, SIMPLIFIED FUNCTION (KPIs and Main Table Only)
+function getDashboardDataFromCSV(filters = {}) {
+    const role = getUserRole(Session.getActiveUser().getEmail());
+    if (role !== 'Admin' && role !== 'Super Admin') { return { error: "Access Denied." }; }
+
+    try {
+        const allSubTaskValues = readCSV(SUB_TASK_FILE_ID);
+        const escalationData = readCSV(ESCALATION_LOGS_FILE_ID);
+        const pauseData = readCSV(PAUSE_LOGS_FILE_ID);
+        
+        const allCases = new Map();
+        allSubTaskValues.forEach(row => {
+            const caseId = (row['Case ID'] || "").toString().trim();
+            if (!caseId) return;
+            if (!allCases.has(caseId)) { allCases.set(caseId, { tasks: [], market: row['Market'], agent: row['User'] }); }
+            allCases.get(caseId).tasks.push(row);
+        });
+
+        const filterStartDate = filters.startDate ? dashboard_assistantParseDateDashed(filters.startDate) : null;
+        const filterEndDate = filters.endDate ? dashboard_assistantParseDateDashed(filters.endDate) : null;
+        if (filterStartDate) filterStartDate.setHours(0, 0, 0, 0);
+        if (filterEndDate) filterEndDate.setHours(23, 59, 59, 999);
+
+        // --- UTILIZATION LOGIC HAS BEEN REMOVED ---
+
+        let kpis = {};
+        
+        const handledCaseIds = new Set();
+        allCases.forEach((caseData, caseId) => {
+            if (filters.market && caseData.market !== filters.market) return;
+            for (const task of caseData.tasks) {
+                if (filters.taskType && (task['Task type'] || "").toString().trim() !== filters.taskType) continue;
+                const taskStart = dashboard_assistantParseDateString(task['Start Timestamp']);
+                if ((filterStartDate && taskStart >= filterStartDate && taskStart <= filterEndDate) || (!filterStartDate && taskStart)) {
+                    handledCaseIds.add(caseId);
+                    break;
+                }
+            }
+        });
+        kpis.totalHandledCases = handledCaseIds.size;
+
+        const { filteredCases, matchingTasksMap } = old_dashboard_filterCases(allCases, filters);
+
+        const inProgressCaseIds = new Set();
+        allCases.forEach((caseData, caseId) => {
+            if (filters.market && caseData.market !== filters.market) return;
+            for (const task of caseData.tasks) {
+                if (filters.taskType && (task['Task type'] || "").toString().trim() !== filters.taskType) continue;
+                const taskStart = dashboard_assistantParseDateString(task['Start Timestamp']);
+                const taskEnd = dashboard_assistantParseDateString(task['End Timestamp']);
+                let isConsideredInProgress = false;
+                if (filterStartDate && filterEndDate) {
+                    if (taskStart && taskStart >= filterStartDate && taskStart <= filterEndDate && (!taskEnd || taskEnd > filterEndDate)) isConsideredInProgress = true;
+                } else if (!filterStartDate && !filterEndDate && !taskEnd) {
+                    if ((task['Status'] || '').trim().toLowerCase() !== 'completed') isConsideredInProgress = true;
+                }
+                if (isConsideredInProgress) {
+                    inProgressCaseIds.add(caseId);
+                    break;
+                }
+            }
+        });
+        
+        const completedCasesInFilter = new Set();
+        filteredCases.forEach((caseData, caseId) => {
+            const isCompleted = caseData.tasks.every(t => (t['Status'] || "").trim().toLowerCase() === 'completed');
+            if (isCompleted) completedCasesInFilter.add(caseId);
+            caseData.status = isCompleted ? "Completed" : "In Progress";
+        });
+        kpis.inProgressTotalCases = inProgressCaseIds.size;
+        kpis.totalCases = completedCasesInFilter.size;
+
+        const allEscalatedCaseIds = new Set(escalationData.map(row => (row['Related Case ID'] || "").toString().trim()));
+        const escalatedCasesInFilter = new Set([...handledCaseIds].filter(caseId => allEscalatedCaseIds.has(caseId)));
+        kpis.casesWithEscalations = escalatedCasesInFilter.size;
+        kpis.casesWithoutEscalations = kpis.totalHandledCases - kpis.casesWithEscalations;
+        
+        const avgEscalationDurationMap = new Map();
+        const caseIdsForAvgEscTime = new Set();
+        escalationData.forEach(eRow => {
+            const caseId = (eRow['Related Case ID'] || "").toString().trim();
+            if (handledCaseIds.has(caseId)) {
+                const start = dashboard_assistantParseDateString(eRow['Escalation Start Time']);
+                const end = dashboard_assistantParseDateString(eRow['Escalation End Time']);
+                if (start && end && end > start) {
+                    if (filterEndDate && end > filterEndDate) return;
+                    avgEscalationDurationMap.set(caseId, (avgEscalationDurationMap.get(caseId) || 0) + (end.getTime() - start.getTime()));
+                    caseIdsForAvgEscTime.add(caseId);
+                }
+            }
+        });
+        let totalAvgEscalationMillis = 0;
+        avgEscalationDurationMap.forEach(duration => totalAvgEscalationMillis += duration);
+        kpis.avgEscalatedTimeMins = caseIdsForAvgEscTime.size > 0 ? (totalAvgEscalationMillis / caseIdsForAvgEscTime.size / 60000).toFixed(2) : "0.00";
+        
+        const cases = filteredCases;
+        const ahtEscalationOverlapMap = new Map();
+        escalationData.forEach(eRow => {
+            const caseId = (eRow['Related Case ID'] || "").toString().trim();
+            if (!matchingTasksMap.has(caseId)) return;
+            const caseTasks = matchingTasksMap.get(caseId) || [];
+            for (const task of caseTasks) {
+                const taskType = (task['Task type'] || "").toString().trim();
+                const taskStart = dashboard_assistantParseDateString(task['Start Timestamp']);
+                const taskEnd = dashboard_assistantParseDateString(task['End Timestamp']);
+                const escStart = dashboard_assistantParseDateString(eRow['Escalation Start Time']);
+                const escEnd = dashboard_assistantParseDateString(eRow['Escalation End Time']);
+                if (taskStart && taskEnd && escStart && escEnd) {
+                    const overlapStart = Math.max(taskStart.getTime(), escStart.getTime());
+                    const overlapEnd = Math.min(taskEnd.getTime(), escEnd.getTime());
+                    const duration = overlapEnd - overlapStart;
+                    if (duration > 0) ahtEscalationOverlapMap.set(`${caseId}-${taskType}`, (ahtEscalationOverlapMap.get(`${caseId}-${taskType}`) || 0) + duration);
+                }
+            }
+        });
+        
+        const pauseMap = new Map();
+        pauseData.forEach(pRow => {
+            const caseId = (pRow['Related Case ID'] || "").toString().trim();
+            if (filteredCases.has(caseId)) {
+                const start = dashboard_assistantParseDateString(pRow['Pause Start Time']);
+                const end = dashboard_assistantParseDateString(pRow['Pause End Time']);
+                if (start && end && end > start) pauseMap.set(caseId, (pauseMap.get(caseId) || 0) + (end.getTime() - start.getTime()));
+            }
+        });
+        
+        cases.forEach((caseData, caseId) => {
+            caseData.isEscalated = escalatedCasesInFilter.has(caseId);
+            let earliestStart = null, latestEnd = null;
+            caseData.tasks.forEach(task => {
+                const start = dashboard_assistantParseDateString(task['Start Timestamp']);
+                const end = dashboard_assistantParseDateString(task['End Timestamp']);
+                if (start && (!earliestStart || start < earliestStart)) earliestStart = start;
+                if (end && (!latestEnd || end > latestEnd)) latestEnd = end;
+            });
+            caseData.earliestStartDate = earliestStart;
+            caseData.latestEndDate = latestEnd;
+        });
+        
+        const kpiFilter = filters.kpiFilter;
+        let sums = { postObqAHTMillis: 0, assetDeliveryAHTMillis: 0, integrationAHTMillis: 0, menuCreationAHTMillis: 0, adminCreationAHTMillis: 0, postObqAHTWithEscMillis: 0, assetDeliveryAHTWithEscMillis: 0, integrationAHTWithEscMillis: 0, menuCreationAHTWithEscMillis: 0, adminCreationAHTWithEscMillis: 0, postObqAHTWithoutEscMillis: 0, assetDeliveryAHTWithoutEscMillis: 0, integrationAHTWithoutEscMillis: 0, menuCreationAHTWithoutEscMillis: 0, adminCreationAHTWithoutEscMillis: 0, integrationTATMillis: 0, assetDeliveryTATMillis: 0, assetTriggeredAHTMillis: 0, adhocProcessAHTMillis: 0, adhocAdminAHTMillis: 0 };
+        let counts = { postObqAHT: 0, assetDeliveryAHT: 0, integrationAHT: 0, menuCreationAHT: 0, adminCreationAHT: 0, postObqAHTWithEsc: 0, assetDeliveryAHTWithEsc: 0, integrationAHTWithEsc: 0, menuCreationAHTWithEsc: 0, adminCreationAHTWithEsc: 0, postObqAHTWithoutEsc: 0, assetDeliveryAHTWithoutEsc: 0, integrationAHTWithoutEsc: 0, menuCreationAHTWithoutEsc: 0, adminCreationAHTWithoutEsc: 0, integrationTAT: 0, assetDeliveryTAT: 0, assetTriggeredAHT: 0, casesMetSLA: 0, integrationPending: 0, adhocProcessAHT: 0, adhocAdminAHT: 0 };
+        const integrationCaseIds = new Set();
+        const taskTypeChartAggregates = {};
+        const adhocCounts = {};
+        
+        cases.forEach((caseData, caseId) => {
+            let hasIntegration = false, caseSlaMet = true;
+            const tasksToProcess = matchingTasksMap.get(caseId) || [];
+            tasksToProcess.forEach(task => {
+                const taskType = (task['Task type'] || "").toString().trim();
+                if (taskType === "Integration") hasIntegration = true;
+                const start = dashboard_assistantParseDateString(task['Start Timestamp']);
+                const end = dashboard_assistantParseDateString(task['End Timestamp']);
+                if (start && end && end > start) {
+                    const durationHours = (end.getTime() - start.getTime()) / 3600000;
+                    if (durationHours > (DASHBOARD_SLA_HOURS[taskType] || DASHBOARD_SLA_HOURS.default)) caseSlaMet = false;
+                }
+            });
+            if (completedCasesInFilter.has(caseId) && caseSlaMet) counts.casesMetSLA++;
+            if (hasIntegration) integrationCaseIds.add(caseId);
+            
+            tasksToProcess.forEach(task => {
+                const taskType = (task['Task type'] || "").toString().trim();
+                if (!taskType) return;
+                if (!taskTypeChartAggregates[taskType]) taskTypeChartAggregates[taskType] = { tatMillis: 0, tatCount: 0, ahtMillis: 0, ahtCount: 0, escCount: 0, nonEscCount: 0 };
+                const agg = taskTypeChartAggregates[taskType];
+                const start = dashboard_assistantParseDateString(task['Start Timestamp']);
+                const end = dashboard_assistantParseDateString(task['End Timestamp']);
+                if (start && end && end > start) {
+                    const rawDuration = end.getTime() - start.getTime();
+                    const pauseDuration = pauseMap.get(caseId) || 0;
+                    const escalationDuration = ahtEscalationOverlapMap.get(`${caseId}-${taskType}`) || 0;
+                    const aht = rawDuration - pauseDuration;
+                    const specificAht = aht - escalationDuration;
+                    agg.tatMillis += rawDuration; agg.tatCount++;
+                    if (aht > 0) { agg.ahtMillis += aht; agg.ahtCount++; }
+                    if (caseData.isEscalated) agg.escCount++; else agg.nonEscCount++;
+                    
+                    const typeConfig = { "Post OBQ": 'postObq', "Asset Delivery": 'assetDelivery', "Integration": 'integration', "Menu Creation": 'menuCreation', "Admin Creation": 'adminCreation', "Adhoc-Process": 'adhocProcess', "Adhoc-Admin": 'adhocAdmin' };
+                    const base = typeConfig[taskType];
+                    if (base && specificAht > 0) {
+                        sums[`${base}AHTMillis`] += specificAht;
+                        counts[`${base}AHT`]++;
+                        if (!base.includes('adhoc')) {
+                            if (allEscalatedCaseIds.has(caseId)) { sums[`${base}AHTWithEscMillis`] += specificAht; counts[`${base}AHTWithEsc`]++; } 
+                            else { sums[`${base}AHTWithoutEscMillis`] += specificAht; counts[`${base}AHTWithoutEsc`]++; }
+                        }
+                    }
+                    if (taskType === "Integration") { sums.integrationTATMillis += rawDuration; counts.integrationTAT++; }
+                    if (taskType === "Asset Delivery") {
+                        const assetDeliveryDate = dashboard_assistantParseDateString(task['Asset Delivered Timestamp']);
+                        if (assetDeliveryDate && start && assetDeliveryDate > start) { sums.assetDeliveryTATMillis += (assetDeliveryDate.getTime() - start.getTime()); counts.assetDeliveryTAT++; }
+                        const assetTriggerDate = dashboard_assistantParseDateString(task['Asset Triggered Timestamp']);
+                        if (assetTriggerDate && start && assetTriggerDate > start) { sums.assetTriggeredAHTMillis += (assetTriggerDate.getTime() - start.getTime()); counts.assetTriggeredAHT++; }
+                    }
+                }
+            });
+            const firstTask = tasksToProcess[0] || {};
+            const firstTaskType = firstTask['Task type'] || "";
+            if ((["Post OBQ", "Adhoc-Process", "Adhoc-Admin"]).includes(firstTaskType)) {
+                const tag = (firstTask['Post OBQ Tags'] || "Untagged").toString().trim();
+                if (tag) adhocCounts[tag] = (adhocCounts[tag] || 0) + 1;
+            }
+        });
+        
+        kpis.integrationPendingCases = Array.from(inProgressCaseIds).filter(id => (allCases.get(id).tasks.some(t => t['Task type'] === 'Integration'))).length;
+        kpis.avgAssetTriggeredAHTMins = counts.assetTriggeredAHT > 0 ? (sums.assetTriggeredAHTMillis / counts.assetTriggeredAHT / 60000).toFixed(2) : "0.00";
+        kpis.avgOnboardingDoneTAT = completedCasesInFilter.size > 0 ? ((counts.casesMetSLA / completedCasesInFilter.size) * 100).toFixed(1) + "%" : "N/A";
+        kpis.avgIntegrationTAT = counts.integrationTAT > 0 ? (sums.integrationTATMillis / counts.integrationTAT / 86400000).toFixed(2) : "0.00";
+        kpis.avgAssetDeliveryTAT = counts.assetDeliveryTAT > 0 ? (sums.assetDeliveryTATMillis / counts.assetDeliveryTAT / 86400000).toFixed(2) : "0.00";
+        kpis.totalCasesWithIntegration = integrationCaseIds.size;
+        
+        const obqAhtResults = getObqAhtKpi(filters, allSubTaskValues, pauseData, escalationData);
+        const ahtKpiTypes = ["postObq", "assetDelivery", "integration", "menuCreation", "adminCreation", "adhocProcess", "adhocAdmin"];
+        ahtKpiTypes.forEach(type => {
+            const capitalizedType = type.charAt(0).toUpperCase() + type.slice(1).replace('-', '');
+            kpis[`avg${capitalizedType}AHTMins`] = counts[`${type}AHT`] > 0 ? (sums[`${type}AHTMillis`] / counts[`${type}AHT`] / 60000).toFixed(2) : "0.00";
+            if (!type.includes('adhoc')) {
+                kpis[`${type}AHTMinsWithEscalations`] = counts[`${type}AHTWithEsc`] > 0 ? (sums[`${type}AHTWithEscMillis`] / counts[`${type}AHTWithEsc`] / 60000).toFixed(2) : "0.00";
+                kpis[`${type}AHTMinsWithoutEscalations`] = counts[`${type}AHTWithoutEsc`] > 0 ? (sums[`${type}AHTWithoutEscMillis`] / counts[`${type}AHTWithoutEsc`] / 60000).toFixed(2) : "0.00";
+            }
+        });
+        
+        kpis.avgObqAHTMins = obqAhtResults.avgObqAHTMins;
+        kpis.obqAHTMinsWithEscalations = obqAhtResults.obqAHTMinsWithEscalations;
+        kpis.obqAHTMinsWithoutEscalations = obqAhtResults.obqAHTMinsWithoutEscalations;
+
+        const uniqueMarkets = new Set(allSubTaskValues.map(r => (r['Market'] || "").toString().trim()).filter(Boolean));
+        const uniqueTaskTypes = new Set(allSubTaskValues.map(r => (r['Task type'] || "").toString().trim()).filter(Boolean));
+        const dropdownOptions = { markets: Array.from(uniqueMarkets).sort(), taskTypes: Array.from(uniqueTaskTypes).sort() };
+        
+        let tableCaseIds;
+        const obqKpiFilters = ['avgObqAHTMins', 'obqAHTMinsWithEscalations', 'obqAHTMinsWithoutEscalations'];
+        if (obqKpiFilters.includes(kpiFilter)) tableCaseIds = obqAhtResults.caseIdsForTable;
+        else if (kpiFilter === 'totalCases') tableCaseIds = completedCasesInFilter;
+        else if (kpiFilter === 'inProgressTotalCases') tableCaseIds = inProgressCaseIds;
+        else if (kpiFilter === 'totalHandledCases') tableCaseIds = handledCaseIds;
+        else tableCaseIds = new Set(filteredCases.keys());
+        
+        const tableData = [];
+        tableCaseIds.forEach(caseId => {
+            const caseData = allCases.get(caseId);
+            if (caseData) {
+                tableData.push({
+                    caseId: caseId, market: caseData.market, agent: caseData.agent, status: caseData.status,
+                    created: caseData.earliestStartDate ? caseData.earliestStartDate.toISOString() : null,
+                    endTimestamp: caseData.latestEndDate ? caseData.latestEndDate.toISOString() : null,
+                    isEscalated: allEscalatedCaseIds.has(caseId),
+                    taskType: [...new Set(caseData.tasks.map(t => (t['Task type'] || '').trim()))].filter(Boolean).join(', ') || 'N/A'
+                });
+            }
+        });
+        
+        const chartData = {};
+        Object.keys(taskTypeChartAggregates).forEach(taskType => {
+            const agg = taskTypeChartAggregates[taskType];
+            chartData[taskType] = { avgTatHours: agg.tatCount > 0 ? (agg.tatMillis / agg.tatCount / 3600000) : 0, avgTatDays: agg.tatCount > 0 ? (agg.tatMillis / agg.tatCount / 86400000) : 0, avgAhtMins: agg.ahtCount > 0 ? (agg.ahtMillis / agg.ahtCount / 60000) : 0, escCount: agg.escCount, nonEscCount: agg.nonEscCount };
+        });
+        
+        return {
+            kpis: kpis, 
+            dropdownOptions: dropdownOptions, 
+            tableData: tableData, 
+            chartData: chartData, 
+            adhocCounts: adhocCounts,
+            lastRefreshed: new Date().toLocaleString(undefined, { timeZone: Session.getScriptTimeZone() }),
+            error: null
+        };
+
+    } catch (error) {
+        console.error("CRITICAL Error in getDashboardDataFromCSV: " + error.toString() + " Stack: " + error.stack);
+        return { success: false, error: "Major error calculating dashboard data: " + error.message };
+    }
+}
+
+
+
+// ==============================================================================
+// UPDATED FUNCTION TO TRIGGER THE REPORT AND RETURN URLs
+// ==============================================================================
+function runReportGenerator() {
+  const role = getUserRole(Session.getActiveUser().getEmail());
+  if (role !== 'Admin' && role !== 'Super Admin') {
+    return { success: false, message: "Access Denied." };
+  }
+
+  try {
+    // This function will now return an object containing the quarantineUrl
+    const result = generateReportAndQuarantineAbnormalTasks(); 
+
+    const reportUrl = SpreadsheetApp.openById(REPORT_SPREADSHEET_ID).getUrl();
+
+    return { 
+      success: true, 
+      reportUrl: reportUrl,
+      quarantineUrl: result ? result.quarantineUrl : null,
+      message: "Report generation complete!"
+    };
+  } catch (e) {
+    Logger.log(`Error starting report generator: ${e.message}`);
+    return { success: false, message: `Failed to start report generation: ${e.message}` };
+  }
+}
+
+
+/**
+ * Replaces the old export function with a new one that creates a beautified,
+ * multi-sheet report. This version is self-contained and does not depend on dashboard filters.
+ */
+function exportUtilizationReport() {
+  try {
+    const spreadsheet = SpreadsheetApp.create('Workforce Utilization Report - ' + new Date().toLocaleDateString());
+    const dashboardSheet = spreadsheet.getSheets()[0];
+    dashboardSheet.setName('Dashboard');
+    const sourceDataSheet = spreadsheet.insertSheet('Source Data');
+    
+    // --- 1. SELF-CONTAINED DATA FETCH & PREPARATION ---
+    const allTasks = readCSV(SUB_TASK_FILE_ID);
+    if (allTasks.length === 0) {
+      SpreadsheetApp.getUi().alert('No task data found to export.');
+      return null;
+    }
+    const headersToKeep = ['Log ID', 'Date', 'Case ID', 'Market', 'Task type', 'Status', 'Case Created', 'Start Timestamp', 'End Timestamp', 'OBQ Reasons', 'Escalation Reasons', 'Comments', 'Stored Escalation Duration', 'Stored Paused Duration', 'Asset Triggered Timestamp', 'Asset Delivered Timestamp', 'OnBoarding Done Timestamp', 'Post OBQ Tags'];
+    const anonymizedData = allTasks.map(row => headersToKeep.map(header => row[header] !== undefined ? row[header] : ''));
+
+    sourceDataSheet.getRange(1, 1, 1, headersToKeep.length).setValues([headersToKeep]).setFontWeight('bold');
+    if (anonymizedData.length > 0) {
+        sourceDataSheet.getRange(2, 1, anonymizedData.length, headersToKeep.length).setValues(anonymizedData);
+    }
+    sourceDataSheet.autoResizeColumns(1, headersToKeep.length);
+    sourceDataSheet.hideSheet();
+
+    // --- 2. BEAUTIFY DASHBOARD SHEET ---
+    dashboardSheet.setGridlines(false);
+    const fullRange = dashboardSheet.getRange('A1:Z100');
+    fullRange.setBackground('#F0F8F5').setFontFamily('Inter');
+    
+    dashboardSheet.getRange('B2:J2').merge().setValue('Workforce Utilization Dashboard')
+      .setFontSize(24).setFontWeight('bold').setHorizontalAlignment('center').setFontColor('#00B14F');
+
+    // --- 3. RUN FULL CALCULATION FOR REPORT ---
+    const now = new Date();
+    const yearStart = new Date(now.getFullYear(), 0, 1);
+    const workDays = getWorkDaysInDateRange(yearStart, now);
+    const reportData = getDashboardDataFromCSV({ workDays: workDays }); // Run with full data for the year
+
+    // --- 4. CREATE COMPLETED TABLE ---
+    const tableHeaders = ["Market", "Available Headcount", "Running AHT(Hours)", "Available Hours", "Productive Hours", "Utilization"];
+    dashboardSheet.getRange('B5').setValue("Utilization for Completed Tasks");
+    dashboardSheet.getRange('B5:J5').merge().setFontWeight('bold').setFontSize(14);
+    const tableHeaderRange = dashboardSheet.getRange('B6:G6');
+    tableHeaderRange.setValues([tableHeaders])
+      .setBackground('#f3f3f3').setFontWeight('bold').setBorder(true, true, true, true, null, null, '#6B7280', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+
+    if (reportData.utilizationByMarket_Completed.length > 0) {
+        const marketRows = reportData.utilizationByMarket_Completed.map(marketInfo => [
+            marketInfo.market, marketInfo.headcount, marketInfo.runningAHT.toFixed(2),
+            marketInfo.availableHours.toFixed(2), marketInfo.productiveHours.toFixed(2), marketInfo.utilization
+        ]);
+        dashboardSheet.getRange(7, 2, marketRows.length, tableHeaders.length).setValues(marketRows);
+        dashboardSheet.getRange(7, 7, marketRows.length, 1).setNumberFormat('0.0%'); // Utilization column
+    }
+
+    // --- 5. CREATE IN-PROGRESS TABLE ---
+    const inProgressHeaders = ["Market", "Active Headcount", "Active Tasks", "Productive Hours (in Period)"];
+    const inProgressStartRow = 10 + (reportData.utilizationByMarket_Completed.length || 1);
+    dashboardSheet.getRange(inProgressStartRow, 2).setValue("Time Spent on In-Progress Tasks");
+    dashboardSheet.getRange(inProgressStartRow, 2, 1, 4).merge().setFontWeight('bold').setFontSize(14);
+    
+    dashboardSheet.getRange(inProgressStartRow + 1, 2, 1, 4).setValues([inProgressHeaders])
+      .setBackground('#f3f3f3').setFontWeight('bold').setBorder(true, true, true, true, null, null, '#6B7280', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+      
+    if (reportData.utilizationByMarket_InProgress.length > 0) {
+        const inProgressRows = reportData.utilizationByMarket_InProgress.map(marketInfo => [
+            marketInfo.market, marketInfo.headcount, marketInfo.taskCount, marketInfo.productiveHours.toFixed(2)
+        ]);
+        dashboardSheet.getRange(inProgressStartRow + 2, 2, inProgressRows.length, inProgressHeaders.length).setValues(inProgressRows);
+    }
+    
+    const legendRow = inProgressStartRow + 2 + (reportData.utilizationByMarket_InProgress.length || 1);
+    dashboardSheet.getRange(legendRow, 2, 1, 4).merge().setValue(`In-progress data calculated as of: ${new Date(reportData.inProgressEndDate).toLocaleString()}`).setItalic(true).setFontSize(9);
+
+
+    // --- 6. CHARTS & SLICERS (Simplified & Robust) ---
+    // Slicers are tricky with complex data sources. We will omit them in this version to guarantee export success.
+    // A chart can be added similarly if needed, but the primary goal is a successful data export.
+    
+    dashboardSheet.autoResizeColumns(2, 10);
+    SpreadsheetApp.flush();
+    return spreadsheet.getUrl();
+
+  } catch (e) {
+    Logger.log(`CRITICAL Error in exportUtilizationReport: ${e.toString()}\nStack: ${e.stack}`);
+    // Do not use UI alert from a non-UI context. Just log and return null.
+    return null;
+  }
+}
+
+
+
+
+
+
+/**
+ * A temporary function to debug the contents and headers of the main CSV files.
+ */
+function debugCsvContents() {
+  Logger.log('--- Starting CSV Content Debug ---');
+  
+  try {
+    // Check Sub Task CSV
+    const subTaskFile = DriveApp.getFileById(SUB_TASK_FILE_ID);
+    const subTaskContent = subTaskFile.getBlob().getDataAsString();
+    if (!subTaskContent) {
+      Logger.log('ERROR: Sub Task CSV file is completely empty.');
+    } else {
+      const subTaskRows = Utilities.parseCsv(subTaskContent);
+      Logger.log(`Found ${subTaskRows.length} total lines in Sub Task CSV.`);
+      if (subTaskRows.length > 0) {
+        Logger.log(`Sub Task Headers: [${subTaskRows[0].join(', ')}]`);
+      }
+    }
+
+    // Check Escalation Logs CSV
+    const escalationRows = readCSV(ESCALATION_LOGS_FILE_ID);
+    Logger.log(`Found ${escalationRows.length} data rows in Escalation Logs CSV.`);
+
+    // Check Pause Logs CSV
+    const pauseRows = readCSV(PAUSE_LOGS_FILE_ID);
+    Logger.log(`Found ${pauseRows.length} data rows in Pause Logs CSV.`);
+
+  } catch (e) {
+    Logger.log(`A critical error occurred during debug: ${e.message}`);
+  }
+  
+  Logger.log('--- CSV Content Debug Finished ---');
+}
+
+
+
+
+
+
+
+
+function getCaseDetailsFromCSV(caseId) {
+    try {
+        if (!caseId) throw new Error("No Case ID provided.");
+        const allTasks = readCSV(SUB_TASK_FILE_ID);
+        const allEscalations = readCSV(ESCALATION_LOGS_FILE_ID);
+        const allPauses = readCSV(PAUSE_LOGS_FILE_ID);
+        const caseIdTrimmed = caseId.toString().trim();
+        const tasks = allTasks.filter(r => (r['Case ID']||'').toString().trim() === caseIdTrimmed).map(r => ({ taskType: r['Task type'], status: r['Status'], start: r['Start Timestamp'], end: r['End Timestamp'], obqReasons: r['Escalation Reasons'], comments: r['Comments'] }));
+        const escalations = allEscalations.filter(r => (r['Related Case ID']||'').toString().trim() === caseIdTrimmed).map(r => ({ taskType: r['Task Type'], start: r['Escalation Start Time'], end: r['Escalation End Time'], reason: r['Escalation Reasons'] }));
+        const pauses = allPauses.filter(r => (r['Related Case ID']||'').toString().trim() === caseIdTrimmed).map(r => ({ start: r['Pause Start Time'], end: r['Pause End Time'] }));
+        return { tasks, escalations, pauses, error: null };
+    } catch (error) {
+        return { error: `Error fetching details: ${error.message}` };
+    }
+}
+
+/**
+ * CORRECTED HELPER FUNCTION
+ * FIX: This version now correctly applies the taskType filter to ensure only
+ * cases containing the selected task type are returned.
+ */
+function dashboard_filterCases_(allCases, filters) {
+    const { startDate, endDate, market, taskType } = filters;
+    const filteredCases = new Map();
+    const matchingTasksMap = new Map();
+    
+    const filterStartDate = startDate ? dashboard_assistantParseDateDashed(startDate) : null;
+    const filterEndDate = endDate ? dashboard_assistantParseDateDashed(endDate) : null;
+    if (filterStartDate) filterStartDate.setHours(0, 0, 0, 0);
+    if (filterEndDate) filterEndDate.setHours(23, 59, 59, 999);
+
+    allCases.forEach((caseData, caseId) => {
+        if (market && (caseData.market || "").toString().trim() !== market) return;
+
+        // If a taskType filter is active, first check if the case contains ANY tasks of that type.
+        if (taskType && !caseData.tasks.some(t => (t['Task type'] || t['Task Type'] || "").toString().trim() === taskType)) {
+            return; // If not, skip this entire case.
+        }
+
+        const caseMatchingTasks = [];
+        for (const task of caseData.tasks) {
+            // Apply the taskType filter again to get only the specific tasks for the map
+            const currentTaskType = (task['Task type'] || task['Task Type'] || "").toString().trim();
+            if (taskType && currentTaskType !== taskType) continue;
+
+            const taskStart = dashboard_assistantParseDateString(task['Start Timestamp']);
+            if (!taskStart) continue;
+
+            const taskEnd = dashboard_assistantParseDateString(task['End Timestamp']);
+            
+            // REPLACE WITH THIS BLOCK
+let isDateMatch = false;
+
+if (!filterStartDate && !filterEndDate) {
+    // If no date filters, include all tasks that have a start date
+    if (taskStart) isDateMatch = true;
+}
+else if (taskStart && taskEnd) {
+    // If using date filters, task must start AND end within the range
+    const startedAfterFilterStart = !filterStartDate || taskStart >= filterStartDate;
+    const endedBeforeFilterEnd = !filterEndDate || taskEnd <= filterEndDate;
+
+    if (startedAfterFilterStart && endedBeforeFilterEnd) {
+        isDateMatch = true;
+    }
+}
+
+            if (isDateMatch) {
+                caseMatchingTasks.push(task);
+            }
+        }
+
+        if (caseMatchingTasks.length > 0) {
+            filteredCases.set(caseId, caseData);
+            matchingTasksMap.set(caseId, caseMatchingTasks);
+        }
+    });
+
+    return { filteredCases, matchingTasksMap };
+}
+
+function dashboard_assistantParseDateDashed(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') return null;
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    const d = new Date(parts[0], parseInt(parts[1], 10) - 1, parts[2]);
+    if (!isNaN(d.getTime())) return d;
+  }
+  return dashboard_assistantParseDateString(dateStr);
+}
+
+// REPLACE your existing function with this one
+function dashboard_assistantParseDateString(dateStr) {
+    if (!dateStr) return null;
+    if (dateStr instanceof Date && !isNaN(dateStr.getTime())) return dateStr;
+    if (typeof dateStr !== 'string') {
+        // Handle cases where the CSV might have a raw number for a date
+        if (typeof dateStr === 'number' && isFinite(dateStr)) {
+            if (dateStr > 20000 && dateStr < 70000) { // Plausible Excel date serial number range
+                const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+                const jsDate = new Date(excelEpoch.getTime() + dateStr * 24 * 60 * 60 * 1000);
+                if (!isNaN(jsDate.getTime())) return jsDate;
+            }
+        }
+        return null;
+    }
+    
+    dateStr = dateStr.trim();
+    if (dateStr === "") return null;
+
+    const dAttempt = new Date(dateStr);
+    if (!isNaN(dAttempt.getTime())) return dAttempt;
+
+    // Second attempt for numeric strings (from CSV)
+    if (!isNaN(parseFloat(dateStr)) && isFinite(dateStr)) {
+        const numVal = parseFloat(dateStr);
+        if (numVal > 20000 && numVal < 70000) {
+            try {
+                const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+                const jsDate = new Date(excelEpoch.getTime() + numVal * 24 * 60 * 60 * 1000);
+                if (!isNaN(jsDate.getTime())) return jsDate;
+            } catch (ex) {}
+        }
+    }
+    return null;
+}
+
+// ADD this new helper function to your code.gs file
+/**
+ * TRUSTED LOGIC TRANSPLANT: This is the filtering function from the old dashboard.
+ * It has a quirk: when no date filters are applied, it ONLY includes completed tasks.
+ * We are replicating it exactly to ensure the numbers match the trusted old dashboard.
+ */
+function old_dashboard_filterCases(allCases, filters) {
+    const { startDate, endDate, market, taskType } = filters;
+    const filteredCases = new Map();
+    const matchingTasksMap = new Map();
+
+    const filterStartDate = startDate ? dashboard_assistantParseDateDashed(startDate) : null;
+    const filterEndDate = endDate ? dashboard_assistantParseDateDashed(endDate) : null;
+    if (filterStartDate) filterStartDate.setHours(0, 0, 0, 0);
+    if (filterEndDate) filterEndDate.setHours(23, 59, 59, 999);
+
+    allCases.forEach((caseData, caseId) => {
+        if (market && (caseData.market || "").toString().trim() !== market) {
+            return;
+        }
+        const caseMatchingTasks = [];
+        for (const task of caseData.tasks) {
+            const currentTaskType = (task['Task type'] || "").toString().trim();
+            if (taskType && currentTaskType !== taskType) {
+                continue;
+            }
+            const taskStart = dashboard_assistantParseDateString(task['Start Timestamp']);
+            const taskEnd = dashboard_assistantParseDateString(task['End Timestamp']);
+            
+            let isDateMatch = false;
+
+            // This is the quirky logic from the old dashboard that we are replicating
+            if (!filterStartDate && !filterEndDate) {
+                // When no filters, it ONLY included tasks with a start and end date.
+                if (taskStart && taskEnd) {
+                    isDateMatch = true;
+                }
+            } else if (taskStart && taskEnd) {
+                // When filters are present, it is a strict "contained within" check
+                if (taskStart >= filterStartDate && taskEnd <= filterEndDate) {
+                    isDateMatch = true;
+                }
+            }
+
+            if (isDateMatch) {
+                caseMatchingTasks.push(task);
+            }
+        }
+        if (caseMatchingTasks.length > 0) {
+            filteredCases.set(caseId, caseData);
+            matchingTasksMap.set(caseId, caseMatchingTasks);
+        }
+    });
+
+    return { filteredCases, matchingTasksMap };
+}
+
+function dashboard_findMainTaskType(tasks) {
+  const taskTypes = new Set(tasks.map(t => (t['Task type'] || "").toString().trim()));
+  if (taskTypes.has("Integration")) return "Integration";
+  if (taskTypes.has("Asset Delivery")) return "Asset Delivery";
+  if (taskTypes.has("Menu Creation")) return "Menu Creation";
+  return Array.from(taskTypes)[0] || "N/A";
+}
+
+function getObqAhtKpi(filters, allSubTaskValues, pauseData, escalationData) {
+  const output = { avgObqAHTMins: "0.00", obqAHTMinsWithEscalations: "0.00", obqAHTMinsWithoutEscalations: "0.00", caseIdsForTable: new Set() };
+  try {
+    const allCases = new Map();
+    allSubTaskValues.forEach(row => {
+      const caseId = (row['Case ID'] || "").toString().trim();
+      if (!caseId) return;
+      if (!allCases.has(caseId)) allCases.set(caseId, { tasks: [], market: row['Market'] });
+      allCases.get(caseId).tasks.push(row);
+    });
+    const obqFilters = { ...filters, taskType: "Onboarding Qualify" };
+    const { filteredCases, matchingTasksMap } = dashboard_filterCases_(allCases, obqFilters);
+    const cases = filteredCases;
+    if (cases.size === 0) return output;
+    const pauseMap = new Map();
+    pauseData.forEach(pRow => {
+      const caseId = (pRow['Related Case ID'] || "").toString().trim();
+      const start = dashboard_assistantParseDateString(pRow['Pause Start Time']);
+      const end = dashboard_assistantParseDateString(pRow['Pause End Time']);
+      if (caseId && start && end && end > start) pauseMap.set(caseId, (pauseMap.get(caseId) || 0) + (end.getTime() - start.getTime()));
+    });
+    const ahtEscalationOverlapMap = new Map();
+    const allEscalatedCaseIds = new Set(escalationData.map(r => r['Related Case ID'])); // CORRECTED: Get all escalated IDs first
+    
+    cases.forEach((caseData, caseId) => {
+      if (!allEscalatedCaseIds.has(caseId)) return; // Skip if case has no escalations at all
+
+      const obqTasks = matchingTasksMap.get(caseId) || [];
+      const caseEscalations = escalationData.filter(e => e['Related Case ID'] === caseId);
+
+      obqTasks.forEach(task => {
+        const taskStart = dashboard_assistantParseDateString(task['Start Timestamp']);
+        const taskEnd = dashboard_assistantParseDateString(task['End Timestamp']);
+        if (!taskStart || !taskEnd) return;
+
+        let totalOverlap = 0;
+        caseEscalations.forEach(eRow => {
+            const escStart = dashboard_assistantParseDateString(eRow['Escalation Start Time']);
+            const escEnd = dashboard_assistantParseDateString(eRow['Escalation End Time']);
+            if (escStart && escEnd) {
+                const overlapStart = Math.max(taskStart.getTime(), escStart.getTime());
+                const overlapEnd = Math.min(taskEnd.getTime(), escEnd.getTime());
+                const duration = overlapEnd - overlapStart;
+                if (duration > 0) totalOverlap += duration;
+            }
+        });
+        const key = `${caseId}-${task['Task type']}`;
+        ahtEscalationOverlapMap.set(key, (ahtEscalationOverlapMap.get(key) || 0) + totalOverlap);
+      });
+    });
+
+    let sums = { obqAHTMillis: 0, obqAHTWithEscMillis: 0, obqAHTWithoutEscMillis: 0 };
+    let counts = { obqAHT: 0, obqAHTWithEsc: 0, obqAHTWithoutEsc: 0 };
+    const includedCaseIds = new Set();
+    cases.forEach((caseData, caseId) => {
+      const tasksToProcess = matchingTasksMap.get(caseId) || [];
+      tasksToProcess.forEach(task => {
+        const start = dashboard_assistantParseDateString(task['Start Timestamp']);
+        const end = dashboard_assistantParseDateString(task['End Timestamp']);
+        if (!start || !end || end < start) return;
+        const rawDuration = end.getTime() - start.getTime();
+        const pauseDuration = pauseMap.get(caseId) || 0;
+        const escalationDuration = ahtEscalationOverlapMap.get(`${caseId}-Onboarding Qualify`) || 0;
+        const specificAht = rawDuration - pauseDuration - escalationDuration;
+        if (specificAht > 0) {
+          includedCaseIds.add(caseId);
+          sums.obqAHTMillis += specificAht;
+          counts.obqAHT++;
+          if (allEscalatedCaseIds.has(caseId)) { sums.obqAHTWithEscMillis += specificAht; counts.obqAHTWithEsc++; }
+          else { sums.obqAHTWithoutEscMillis += specificAht; counts.obqAHTWithoutEsc++; }
+        }
+      });
+    });
+    output.caseIdsForTable = includedCaseIds;
+    if (counts.obqAHT > 0) output.avgObqAHTMins = (sums.obqAHTMillis / counts.obqAHT / 60000).toFixed(2);
+    if (counts.obqAHTWithEsc > 0) output.obqAHTMinsWithEscalations = (sums.obqAHTWithEscMillis / counts.obqAHTWithEsc / 60000).toFixed(2);
+    if (counts.obqAHTWithoutEsc > 0) output.obqAHTMinsWithoutEscalations = (sums.obqAHTWithoutEscMillis / counts.obqAHTWithoutEsc / 60000).toFixed(2);
+    return output;
+  } catch(e) {
+    console.error(`Error in getObqAhtKpi: ${e}`);
+    return output;
+  }
+}
+
+// =================================================================
+// RESTORED: Dashboard Helper Functions
+// =================================================================
+function exportDataToSheet(headers, rows) {
+  try {
+      const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH'h'mm'm'");
+      const sheetName = `Dashboard Export ${timestamp}`;
+      const newSpreadsheet = SpreadsheetApp.create(sheetName);
+      const sheet = newSpreadsheet.getSheets()[0];
+      sheet.appendRow(headers);
+      if (rows && rows.length > 0) {
+          sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
+      }
+      sheet.getRange(1, 1, 1, headers.length).setFontWeight("bold");
+      sheet.autoResizeColumns(1, headers.length);
+      return newSpreadsheet.getUrl();
+  } catch (e) {
+      Logger.log(`CRITICAL Error in exportDataToSheet: ${e.toString()}`);
+      return null;
+  }
+}
+
+function getKpiCalculationReport(filters, kpiId) {
+  // --- CORRECTED LOGIC (PROBLEM 1) ---
+  try {
+      const log = [];
+      const allSubTaskValues = readCSV(SUB_TASK_FILE_ID);
+      log.push({
+          title: "Step 1: Initial Data Load & Grouping",
+          summary: `Loaded ${allSubTaskValues.length} task rows from CSV and grouped them into ${new Set(allSubTaskValues.map(r=>r['Case ID'])).size} unique cases.`
+      });
+
+      const ahtKpiRegex = /^(avg|.*AHTMins)/;
+      if (ahtKpiRegex.test(kpiId) && !kpiId.includes('avgEscalatedTime')) {
+           log.push({
+               title: "Step 2: Logic for AHT Calculation",
+               summary: `This KPI calculates an Average Handling Time. It finds all relevant tasks that START and END within the date filters and calculates their duration (End Timestamp - Start Timestamp). It then subtracts any pause time, and crucially, subtracts only the portion of any escalation that actually overlapped with the task's active work time.`
+           });
+           log.push({
+               title: "Step 3: Final Calculation",
+               summary: `The final number is the average of these calculated durations in minutes. The 'w/ Escalations' and 'w/o Escalations' versions further filter this group based on whether the case has any escalation logs.`
+           });
+           return { log, error: null };
+      }
+
+      switch (kpiId) {
+          case 'inProgressTotalCases':
+              log.push({
+                  title: "Step 2: Logic for 'In-Progress Cases'",
+                  summary: `Searched all tasks for cases that either started in the date range and ended after it, or (if no date range is set) have no end date at all.`
+              });
+              break;
+          case 'totalHandledCases':
+          case 'casesWithEscalations':
+          case 'casesWithoutEscalations':
+          case 'avgEscalatedTimeMins':
+              log.push({
+                  title: "Step 2: Identify 'Handled Cases'",
+                  summary: `Identifies all cases that have at least one task that STARTED within the filtered date range, regardless of when they ended.`
+              });
+              if(kpiId.toLowerCase().includes('escalation')){
+                 log.push({
+                       title: "Step 3: Check Against Escalation Logs",
+                       summary: `The 'handled' cases are then checked against the escalation logs to determine which have and have not been escalated.`
+                   });
+              }
+              if (kpiId === 'avgEscalatedTimeMins') {
+                  log.push({
+                      title: "Step 4: Final Calculation",
+                      summary: `The final KPI is the average duration of only the escalations that are fully completed for the 'handled cases'.`
+                  });
+              }
+              break;
+          default:
+              log.push({
+                  title: "Step 2: Standard Filtering",
+                  summary: `This KPI is based on cases where the relevant tasks must both START and END within the selected date range to be included in the calculation.`
+              });
+              break;
+      }
+      return { log: log, error: null };
+  } catch (e) {
+      Logger.log(`CRITICAL Error in getKpiCalculationReport: ${e.toString()}`);
+      return { error: `Error generating report: ${e.message}` };
+  }
+}
+
+
+
+
+// =================================================================
+// LEGACY EXPORT UTILITY (RESTORED)
+// =================================================================
+function exportAllDataFromSourceSheet() {
+  const sheetsToExport = [
+    { sheetName: 'Sub Task Sheet', fileName: 'Exported_SubTasks.csv' },
+    { sheetName: 'Escalation Logs', fileName: 'Exported_EscalationLogs.csv' },
+    { sheetName: 'Pause Logs', fileName: 'Exported_PauseLogs.csv' }
+  ];
+  try {
+    const spreadsheet = SpreadsheetApp.openById(SOURCE_SHEET_ID);
+    const formatCell = (cellData) => {
+      if (cellData instanceof Date) { return cellData.toISOString(); }
+      const stringData = String(cellData || '');
+      if (stringData.includes(',') || stringData.includes('"') || stringData.includes('\n')) {
+        return `"${stringData.replace(/"/g, '""')}"`;
+      }
+      return stringData;
+    };
+    sheetsToExport.forEach(config => {
+      const sheet = spreadsheet.getSheetByName(config.sheetName);
+      if (!sheet) { Logger.log(`WARNING: Sheet "${config.sheetName}" not found. Skipping.`); return; }
+      const data = sheet.getDataRange().getValues();
+      if (data.length < 2) { Logger.log(`INFO: Sheet "${config.sheetName}" is empty. No file created.`); return; }
+      const csvContent = data.map(row => row.map(formatCell).join(',')).join('\n');
+      DriveApp.createFile(config.fileName, csvContent, MimeType.CSV);
+      Logger.log(`SUCCESS: Exported "${config.sheetName}" to "${config.fileName}".`);
+    });
+  } catch (e) { Logger.log("EXPORT FAILED: " + e.toString()); }
+}
+
+
+/**
+ * A specific debug function to inspect the raw status data for a given Case ID from the CSV.
+ */
+function debugCaseStatus() {
+  const caseIdToDebug = "33186"; // The specific case ID you mentioned
+
+  Logger.log(`--- Starting Debug for Case ID: ${caseIdToDebug} ---`);
+
+  try {
+    const allTasks = readCSV(SUB_TASK_FILE_ID);
+    const caseTasks = allTasks.filter(task => task['Case ID'] === caseIdToDebug);
+
+    if (caseTasks.length === 0) {
+      Logger.log(`No tasks found for Case ID: ${caseIdToDebug}`);
+    } else {
+      Logger.log(`Found ${caseTasks.length} task(s) for Case ID: ${caseIdToDebug}. Here is the raw data from the CSV:`);
+      
+      caseTasks.forEach((task, index) => {
+        Logger.log(`\n--- Task ${index + 1} ---`);
+        Logger.log(`Task Type: ${task['Task type']}`);
+        Logger.log(`Status in CSV: ${task['Status']}`);
+        Logger.log(`Start Timestamp: ${task['Start Timestamp']}`);
+        Logger.log(`End Timestamp: ${task['End Timestamp']}`);
+      });
+    }
+  } catch (e) {
+    Logger.log(`An error occurred during the debug function: ${e.message}`);
+  }
+  
+  Logger.log(`--- Debug Finished ---`);
+}
+
+
+/**
+ * A one-time utility function to scan and fix inconsistent statuses in the main Sub_Tasks.csv file.
+ * It finds tasks where the Status is 'InProgress' but an End Timestamp exists, and corrects the Status to 'Completed'.
+ */
+function fixInconsistentStatuses() {
+  Logger.log("--- Starting Data Cleanup Process ---");
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000); // Wait up to 30 seconds for other processes to finish.
+
+  try {
+    const allTasks = readCSV(SUB_TASK_FILE_ID);
+    let correctedCount = 0;
+
+    allTasks.forEach(task => {
+      // Find tasks that have an End Timestamp but are still marked as InProgress
+      if (task['Status'] === 'InProgress' && task['End Timestamp']) {
+        task['Status'] = 'Completed'; // Correct the status
+        correctedCount++;
+        Logger.log(`Corrected Log ID: ${task['Log ID']} (Case ID: ${task['Case ID']})`);
+      }
+    });
+
+    if (correctedCount > 0) {
+      Logger.log(`Found and corrected ${correctedCount} tasks. Writing updated data back to the CSV file...`);
+      // CHANGE 10: Update this call to use the master headers.
+      writeCSV(SUB_TASK_FILE_ID, allTasks, SUB_TASK_HEADERS);
+      Logger.log("Successfully updated the Sub_Tasks.csv file.");
+    } else {
+      Logger.log("No inconsistent task statuses found. Your data is already clean.");
+    }
+
+  } catch (e) {
+    Logger.log(`An error occurred during the cleanup process: ${e.message}`);
+  } finally {
+    lock.releaseLock();
+  }
+
+  Logger.log("--- Data Cleanup Process Finished ---");
+}
+
+
+/**
+ * Creates a two-sheet Google Sheet: one static report and one interactive calculator.
+ * @param {object} reportData - The data object from the dashboard.
+ * @returns {string} The URL of the newly created spreadsheet.
+ */
+/**
+ * Creates a multi-sheet Google Sheet with a static market report and an interactive market calculator.
+ * @param {object} reportData - An object containing the headers and rows of the market utilization table.
+ * @returns {string} The URL of the newly created spreadsheet.
+ */
+function exportUtilizationReport(reportData) {
+  try {
+    const spreadsheet = SpreadsheetApp.create('Utilization by Market Report - ' + new Date().toLocaleDateString());
+    
+    // --- PART 1: Create the Static, Beautified Report Sheet ---
+    const reportSheet = spreadsheet.getSheets()[0];
+    reportSheet.setName('Market Utilization Report');
+    
+    reportSheet.getRange('A1').setValue('Market Utilization Report').setFontWeight('bold').setFontSize(14);
+    
+    // Set Headers
+    const headers = reportData.headers;
+    reportSheet.getRange(3, 1, 1, headers.length).setValues([headers]).setFontWeight('bold').setBackground('#f3f3f3');
+    reportSheet.setFrozenRows(3);
+    
+    // Set Data Rows
+    const dataRows = reportData.rows;
+    if (dataRows.length > 0) {
+      reportSheet.getRange(4, 1, dataRows.length, headers.length).setValues(dataRows);
+    }
+    
+    // Beautify the report sheet
+    const utilColumnIndex = headers.indexOf('Utilization') + 1;
+    if (utilColumnIndex > 0) {
+      reportSheet.getRange(4, utilColumnIndex, dataRows.length).setNumberFormat('0%');
+    }
+    reportSheet.autoResizeColumns(1, headers.length);
+    const bandedRange = reportSheet.getRange(3, 1, dataRows.length + 1, headers.length);
+    bandedRange.applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY);
+
+
+    // --- PART 2: Create the Interactive Calculator Sheet ---
+    const calculatorSheet = spreadsheet.insertSheet('Interactive Market Calculator');
+
+    // Headers and Titles
+    calculatorSheet.getRange('A1:I1').merge().setValue('Interactive Utilization Calculator').setFontWeight('bold').setFontSize(14).setHorizontalAlignment('center');
+    calculatorSheet.getRange('A2:I2').merge().setValue('Enter data in the yellow cells to see calculations update automatically.').setItalic(true).setHorizontalAlignment('center');
+    calculatorSheet.getRange('A4').setValue('Global Inputs:').setFontWeight('bold');
+    calculatorSheet.getRange('B4').setValue('Workdays in Period:').setFontWeight('bold');
+    calculatorSheet.getRange('C4').setBackground('#fff2cc').setNote('Enter the number of working days (e.g., 22).');
+    
+    // Set up the table headers
+    calculatorSheet.getRange(6, 1, 1, headers.length).setValues([headers]).setFontWeight('bold').setBackground('#f3f3f3');
+    calculatorSheet.setFrozenRows(6);
+
+    // Define input and formula columns
+    const inputNote = 'Enter the data for this market in this column.';
+    const inputBG = '#fff2cc';
+
+    // Columns A, B, C, E, H are inputs
+    calculatorSheet.getRange('A7:C20').setBackground(inputBG).setNote(inputNote); // Market, Headcount, Daily Hours
+    calculatorSheet.getRange('E7:E20').setBackground(inputBG).setNote(inputNote); // Completed Volume
+    calculatorSheet.getRange('H7:H20').setBackground(inputBG).setNote(inputNote); // Productive Hours
+
+    // Columns D, F, G, I are formulas
+    for (let i = 7; i <= 20; i++) {
+      calculatorSheet.getRange(`D${i}`).setFormula(`=C${i}*0.15`).setNumberFormat('0.0'); // Daily Shrinkage
+      calculatorSheet.getRange(`F${i}`).setFormula(`=IF(E${i}>0, H${i}/E${i}, 0)`).setNumberFormat('0.00'); // Running AHT
+      calculatorSheet.getRange(`G${i}`).setFormula(`=B${i}*C$4*C${i}*(1-0.15)`).setNumberFormat('0.00'); // Available Hours
+      calculatorSheet.getRange(`I${i}`).setFormula(`=IFERROR(H${i}/G${i}, 0)`).setNumberFormat('0%'); // Utilization
+    }
+    
+    // Beautify calculator sheet
+    calculatorSheet.getRange("I:I").setBackground('#d9ead3');
+    calculatorSheet.autoResizeColumns(1, headers.length);
+
+
+    // --- PART 3: Create Explanations Sheet ---
+    const explanationSheet = spreadsheet.insertSheet('Explanations');
+    explanationSheet.getRange('A1').setValue('Metric Explanations').setFontWeight('bold').setFontSize(12);
+    explanationSheet.getRange('A3').setValue('Available Headcount').setFontWeight('bold');
+    explanationSheet.getRange('B3').setValue('The number of unique agents who worked on tasks for that market during the period.');
+    explanationSheet.getRange('A4').setValue('Running AHT (Hours)').setFontWeight('bold');
+    explanationSheet.getRange('B4').setValue('Average Handling Time. The total productive hours for a market divided by its completed volume.');
+    explanationSheet.getRange('A5').setValue('Available Hours').setFontWeight('bold');
+    explanationSheet.getRange('B5').setValue('The total work hours available from the team for a market after accounting for non-working days and shrinkage.');
+    explanationSheet.getRange('A6').setValue('Productive Hours').setFontWeight('bold');
+    explanationSheet.getRange('B6').setValue('The sum of all time spent on tasks that were either completed or still in progress during the selected period for a market.');
+    explanationSheet.getRange('A7').setValue('Utilization').setFontWeight('bold');
+    explanationSheet.getRange('B7').setValue('The percentage of available hours that were spent on productive tasks. (Productive Hours / Available Hours)');
+    explanationSheet.autoResizeColumns(1, 2);
+    
+    // Activate the main report sheet for the user
+    spreadsheet.setActiveSheet(reportSheet);
+    
+    return spreadsheet.getUrl();
+  } catch (e) {
+    Logger.log(`CRITICAL Error in exportUtilizationReport: ${e.toString()}`);
+    return null;
+  }
+}
+
+/**
+ * NEW, ACCURATE CALCULATION ENGINE
+ * Calculates the total productive milliseconds for a task, respecting business hours
+ * (Mon-Fri, 10am-6pm), subtracting pauses/escalations, and applying shrinkage.
+ */
+function calculateBusinessProductiveMillis(taskStart, taskEnd, casePauses, caseEscalations) {
+    if (!taskStart || !taskEnd || taskEnd <= taskStart) {
+        return 0;
+    }
+
+    let netMillis = 0;
+    const current = new Date(taskStart.getTime());
+    current.setHours(0, 0, 0, 0); // Start iterating from the beginning of the start day
+
+    while (current <= taskEnd) {
+        const dayOfWeek = current.getDay();
+        // Check if it's a weekday (Monday=1, Friday=5)
+        if (dayOfWeek > 0 && dayOfWeek < 6) {
+            const businessStart = new Date(current.getTime());
+            businessStart.setHours(10, 0, 0, 0); // 10:00 AM
+
+            const businessEnd = new Date(current.getTime());
+            businessEnd.setHours(18, 0, 0, 0); // 6:00 PM
+
+            // Determine the actual work window for this specific day
+            const effectiveStart = new Date(Math.max(taskStart.getTime(), businessStart.getTime()));
+            const effectiveEnd = new Date(Math.min(taskEnd.getTime(), businessEnd.getTime()));
+
+            if (effectiveEnd > effectiveStart) {
+                let grossMillisThisDay = effectiveEnd.getTime() - effectiveStart.getTime();
+                let deductionMillisThisDay = 0;
+
+                // Helper to calculate deductions within the day's work window
+                const calculateDeductions = (logs) => {
+                    let totalDeduction = 0;
+                    (logs || []).forEach(log => {
+                        const logStart = dashboard_assistantParseDateString(log['Escalation Start Time'] || log['Pause Start Time']);
+                        const logEnd = dashboard_assistantParseDateString(log['Escalation End Time'] || log['Pause End Time']);
+                        if (!logStart || !logEnd) return;
+
+                        const overlapStart = Math.max(effectiveStart.getTime(), logStart.getTime());
+                        const overlapEnd = Math.min(effectiveEnd.getTime(), logEnd.getTime());
+
+                        if (overlapEnd > overlapStart) {
+                            totalDeduction += (overlapEnd - overlapStart);
+                        }
+                    });
+                    return totalDeduction;
+                };
+                
+                deductionMillisThisDay += calculateDeductions(casePauses);
+                deductionMillisThisDay += calculateDeductions(caseEscalations);
+
+                netMillis += Math.max(0, grossMillisThisDay - deductionMillisThisDay);
+            }
+        }
+        // Move to the next day
+        current.setDate(current.getDate() + 1);
+    }
+    
+    // Apply 15% shrinkage rate to the final calculated time
+    return netMillis * (1 - 0.15);
+}
+

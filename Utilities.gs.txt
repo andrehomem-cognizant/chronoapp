@@ -1,0 +1,138 @@
+// =========================================================================
+// FILE: Utilities.gs (NEW FILE)
+// =========================================================================
+
+/**
+ * Reads a CSV file from Drive and converts it to an array of objects.
+ */
+function readCSV(fileId) {
+    try {
+        const file = DriveApp.getFileById(fileId);
+        const content = file.getBlob().getDataAsString();
+        if (!content || content.trim() === '') return [];
+        const rows = Utilities.parseCsv(content);
+        if (rows.length < 2) return [];
+        const headers = rows.shift();
+        return rows.map(row => {
+            let obj = {};
+            headers.forEach((header, index) => {
+                obj[header] = row[index];
+            });
+            return obj;
+        });
+    } catch (e) {
+        Logger.log(`Error reading CSV with ID ${fileId}: ${e.message}`);
+        return [];
+    }
+}
+
+/**
+ * Writes an array of objects to a CSV file in Drive using a provided header list.
+ * This is the definitive, safe version that prevents column reordering and data loss.
+ */
+function writeCSV(fileId, data, headers) {
+  try {
+    if (!headers || headers.length === 0) {
+      // If no headers are provided, fall back to deriving from data, but log a warning.
+      Logger.log(`Warning: writeCSV called for file ID ${fileId} without a master header list. This is potentially unsafe.`);
+      if (data && data.length > 0) {
+        headers = Object.keys(data[0]);
+      } else {
+        // If no data and no headers, write an empty file.
+        DriveApp.getFileById(fileId).setContent("");
+        return;
+      }
+    }
+
+    const formatCell = (cellData) => {
+        const stringData = String(cellData === undefined || cellData === null ? '' : cellData);
+        if (stringData.includes(',') || stringData.includes('"') || stringData.includes('\n')) {
+            return `"${stringData.replace(/"/g, '""')}"`;
+        }
+        return stringData;
+    };
+    
+    // Build the CSV content using the provided master 'headers' array
+    const csvContentArray = data.map(row => headers.map(header => formatCell(row[header])).join(','));
+    const csvContent = [headers.join(','), ...csvContentArray].join('\n');
+    
+    DriveApp.getFileById(fileId).setContent(csvContent);
+
+  } catch (e) {
+    Logger.log(`CRITICAL ERROR writing to CSV with ID ${fileId}: ${e.message}`);
+  }
+}
+
+/**
+ * Safely parses a date string into a Date object.
+ */
+function parseDate(dateStr) {
+    if (!dateStr) return null;
+    if (dateStr instanceof Date && !isNaN(dateStr.getTime())) return dateStr;
+    if (typeof dateStr !== 'string') return null;
+    const dAttempt = new Date(dateStr.trim());
+    return !isNaN(dAttempt.getTime()) ? dAttempt : null;
+}
+
+/**
+ * Calculates working days (Mon-Fri) between two dates.
+ */
+function getWorkDaysInDateRange(startDate, endDate) {
+    let count = 0;
+    const curDate = new Date(startDate.getTime());
+    while (curDate <= endDate) {
+        const dayOfWeek = curDate.getDay();
+        if (dayOfWeek !== 0 && dayOfWeek !== 6) count++;
+        curDate.setDate(curDate.getDate() + 1);
+    }
+    return count > 0 ? count : 1;
+}
+
+
+/**
+ * Fetches all rows from a specified Google Sheet.
+ * This is the definitive version.
+ */
+function fetchFromGoogleSheet_(sheetId) {
+  try {
+    const sheet = SpreadsheetApp.openById(sheetId).getSheets()[0];
+    const values = sheet.getDataRange().getValues();
+    if (values.length < 2) return [];
+    const headers = values.shift();
+    return values.map(row => {
+      let obj = {};
+      headers.forEach((header, index) => {
+        obj[header] = row[index];
+      });
+      return obj;
+    });
+  } catch (e) {
+    Logger.log(`Failed to fetch from Google Sheet ID ${sheetId}: ${e.message}`);
+    return [];
+  }
+}
+
+
+/**
+ * Fetches all rows from a specified AppSheet Database table using the "Find" action.
+ * This is the definitive version.
+ */
+function fetchFromAppSheetAPI_(tableName) {
+    const apiUrl = `https://api.appsheet.com/api/v2/apps/${APPSHEET_APP_ID}/tables/${tableName}/Action`;
+    const payload = JSON.stringify({ "Action": "Find", "Properties": {"Locale": "en-US"}, "Rows": [] });
+    const options = {
+        'method': 'post',
+        'contentType': 'application/json',
+        'headers': { 'ApplicationAccessKey': APPSHEET_ACCESS_KEY },
+        'payload': payload,
+        'muteHttpExceptions': true
+    };
+    const response = UrlFetchApp.fetch(apiUrl, options);
+    const responseText = response.getContentText();
+    if (response.getResponseCode() === 200) {
+        return responseText ? JSON.parse(responseText) : [];
+    } else {
+        Logger.log(`Failed to fetch from AppSheet API for table ${tableName}. Code: ${response.getResponseCode()}, Response: ${responseText}`);
+        return [];
+    }
+}

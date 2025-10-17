@@ -1,0 +1,252 @@
+// ==============================================================================
+// CLIENT DATA EXPORTER SCRIPT (WITH USER ANONYMIZATION)
+// ==============================================================================
+
+// --- CONFIGURATION ---
+// PASTE THE ID OF THE GOOGLE SHEET IN THE CLIENT'S SHARED FOLDER HERE
+const CLIENT_SHARED_SHEET_ID = "1UL6wMS9nBtS_mQQcJQ3gceZYhkVb2T2ab7EzTR6zpqs";
+
+/**
+ * STARTER FUNCTION: Manually run this function to begin the sequential export process.
+ */
+function runClientExportSequence() {
+  const allTriggers = ScriptApp.getProjectTriggers();
+  for (const trigger of allTriggers) {
+    if (trigger.getHandlerFunction() === '_continueClientExportSequence') {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  }
+  Logger.log('Starting sequential client export...');
+  PropertiesService.getScriptProperties().setProperty('clientExportStep', '1');
+  ScriptApp.newTrigger('_continueClientExportSequence')
+      .timeBased()
+      .after(10 * 1000) // 10 seconds
+      .create();
+  Logger.log('First export task (Sub Tasks) has been scheduled.');
+}
+
+/**
+ * WORKER FUNCTION: Called by a trigger, do not run manually.
+ */
+function _continueClientExportSequence() {
+  const scriptProperties = PropertiesService.getScriptProperties();
+  const step = scriptProperties.getProperty('clientExportStep');
+
+  const allTriggers = ScriptApp.getProjectTriggers();
+  for (const trigger of allTriggers) {
+    if (trigger.getHandlerFunction() === '_continueClientExportSequence') {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  }
+
+  switch (step) {
+    case '1':
+      Logger.log('Executing Step 1: Exporting Sub Tasks...');
+      exportSubTasksToClientSheet();
+      scriptProperties.setProperty('clientExportStep', '2');
+      ScriptApp.newTrigger('_continueClientExportSequence').timeBased().after(10 * 1000).create();
+      Logger.log('Step 1 complete. Scheduling Step 2 (Escalations).');
+      break;
+    case '2':
+      Logger.log('Executing Step 2: Exporting Escalation Logs...');
+      exportEscalationsToClientSheet();
+      scriptProperties.setProperty('clientExportStep', '3');
+      ScriptApp.newTrigger('_continueClientExportSequence').timeBased().after(10 * 1000).create();
+      Logger.log('Step 2 complete. Scheduling Step 3 (Pauses).');
+      break;
+    case '3':
+      Logger.log('Executing Step 3: Exporting Pause Logs...');
+      exportPausesToClientSheet();
+      scriptProperties.deleteProperty('clientExportStep');
+      Logger.log('Step 3 complete. Sequential export finished.');
+      break;
+    default:
+      Logger.log('Unknown step or process finished.');
+      scriptProperties.deleteProperty('clientExportStep');
+      break;
+  }
+}
+
+// --- INDIVIDUAL EXPORT FUNCTIONS (CALLED BY THE WORKER) ---
+
+function exportSubTasksToClientSheet() {
+  const job = {
+    sheetName: "Sub Task Data",
+    fileId: "1EPme5e14agnNBm80Kx7BEOWjfPtDOELr",
+    headers: [
+      'Log ID', 'Date', 'Case ID', 'Market', 'User', 'Task type',
+      'Start Timestamp', 'End Timestamp', 'OBQ Reasons', 'Case Created',
+      'Status', 'Comments', 'Escalation Reasons', 'Stored Escalation Duration',
+      'Stored Paused Duration', 'Asset Trigger Date', 'Asset Delivery Date',
+      'OnBoarding Done', 'Flag Asset Action', 'Flag OnBoarding Done',
+      'Post OBQ Tags', 'isReadyToDelete'
+    ],
+  };
+  _exportSingleCsvToSheet(job.sheetName, job.fileId, job.headers, CLIENT_SHARED_SHEET_ID);
+}
+
+function exportEscalationsToClientSheet() {
+  const job = {
+    sheetName: "Escalation Logs",
+    fileId: "17WwXrYSUFYAiAsbSi6nCfgjOp_MNTb5v",
+    headers: ['Log ID', 'Related Case ID', 'Market', 'Task Type', 'Escalation Start Time', 'Escalation End Time', 'Escalation Reasons', 'OBQ_SLA_Status'],
+  };
+  _exportSingleCsvToSheet(job.sheetName, job.fileId, job.headers, CLIENT_SHARED_SHEET_ID);
+}
+
+function exportPausesToClientSheet() {
+  const job = {
+    sheetName: "Pause Logs",
+    fileId: "1ksGOgIXi4VVsN0QG-c-yBQLGAUmVyt2y",
+    headers: ['Log ID', 'Related Case ID', 'Market', 'Task type', 'Pause Start Time', 'Pause End Time'],
+  };
+  _exportSingleCsvToSheet(job.sheetName, job.fileId, job.headers, CLIENT_SHARED_SHEET_ID);
+}
+
+/**
+ * HELPER FUNCTION: Processes one CSV and writes it to one sheet, overwriting old data.
+ * This version includes logic to anonymize the 'User' column if it exists.
+ */
+function _exportSingleCsvToSheet(sheetName, fileId, blueprintHeaders, targetSpreadsheetId) {
+  Logger.log(`Processing export for: ${sheetName}...`);
+  try {
+    const spreadsheet = SpreadsheetApp.openById(targetSpreadsheetId);
+    let sheet = spreadsheet.getSheetByName(sheetName);
+    if (!sheet) {
+      sheet = spreadsheet.insertSheet(sheetName);
+    } else {
+      sheet.clear();
+    }
+    sheet.getRange(1, 1, 1, blueprintHeaders.length).setValues([blueprintHeaders]).setFontWeight('bold');
+    sheet.setFrozenRows(1);
+
+    const dataArray = (function(id) {
+      try {
+        const file = DriveApp.getFileById(id);
+        const content = file.getBlob().getDataAsString();
+        return (!content || content.trim() === '') ? [] : Utilities.parseCsv(content);
+      } catch(e) {
+        Logger.log(`Failed to read CSV ${id}. Error: ${e.message}`);
+        return [];
+      }
+    })(fileId);
+
+    if (!dataArray || dataArray.length <= 1) {
+      Logger.log(`No data rows to write for sheet: ${sheetName}.`);
+      return;
+    }
+
+    const csvHeaders = dataArray.shift();
+    const headerMap = blueprintHeaders.map(h => csvHeaders.indexOf(h));
+    
+    // --- THIS IS THE FIX ---
+    // Find the position of the 'User' column in the final, ordered blueprint.
+    const userColumnBlueprintIndex = blueprintHeaders.indexOf('User');
+    // -----------------------
+
+    const batchSize = 500;
+    Logger.log(`Writing ${dataArray.length} records to ${sheetName} in batches...`);
+    for (let i = 0; i < dataArray.length; i += batchSize) {
+      const chunk = dataArray.slice(i, i + batchSize);
+      
+      const orderedBatch = chunk.map(row => {
+        // First, create the row with columns in the correct order.
+        const reorderedRow = headerMap.map(index => (index === -1) ? '' : row[index]);
+        
+        // --- THIS IS THE FIX ---
+        // If a 'User' column exists in our blueprint (index is not -1),
+        // overwrite its value in the reordered row with the anonymized string.
+        if (userColumnBlueprintIndex !== -1) {
+          reorderedRow[userColumnBlueprintIndex] = "Agent Encripted ID xxx";
+        }
+        // -----------------------
+
+        return reorderedRow;
+      });
+
+      if (orderedBatch.length > 0) {
+        sheet.getRange(i + 2, 1, orderedBatch.length, blueprintHeaders.length).setValues(orderedBatch);
+        SpreadsheetApp.flush();
+      }
+    }
+    sheet.autoResizeColumns(1, blueprintHeaders.length);
+    Logger.log(`Successfully finished writing records to sheet: ${sheetName}.`);
+  } catch (e) {
+    Logger.log(`A critical error occurred during the export of ${sheetName}: ${e.message}`);
+  }
+}
+
+
+
+// ==============================================================================
+// ===== NEW TEMPORARY DIAGNOSTIC FUNCTION ======================================
+// ==============================================================================
+
+/**
+ * A temporary diagnostic tool to check for the existence of data in specific CSV columns.
+ * Run this function from the Apps Script editor and check the logs.
+ */
+function diagnoseCsvColumns() {
+  Logger.log("--- Starting CSV Column Data Diagnostic ---");
+
+  const FILE_ID = "1EPme5e14agnNBm80Kx7BEOWjfPtDOELr"; // SUB_TASK_FILE_ID
+  const COLUMNS_TO_CHECK = ['Asset Trigger Date', 'Asset Delivery Date', 'OnBoarding Done'];
+  
+  try {
+    const data = readCSV(FILE_ID); // Assumes readCSV is available in the project
+    if (!data || data.length === 0) {
+      Logger.log("ERROR: The CSV file is empty or could not be read.");
+      return;
+    }
+    
+    Logger.log(`Scanning ${data.length} rows for data in the following columns: ${COLUMNS_TO_CHECK.join(', ')}`);
+
+    let foundDataCounts = {
+      'Asset Trigger Date': 0,
+      'Asset Delivery Date': 0,
+      'OnBoarding Done': 0
+    };
+    
+    let firstRowWithData = null;
+
+    data.forEach(row => {
+      let thisRowHasData = false;
+      COLUMNS_TO_CHECK.forEach(col => {
+        if (row[col] && String(row[col]).trim() !== '') {
+          foundDataCounts[col]++;
+          thisRowHasData = true;
+        }
+      });
+
+      // Capture the first row we find that has any data in the target columns
+      if (thisRowHasData && firstRowWithData === null) {
+        firstRowWithData = row;
+      }
+    });
+
+    Logger.log("\n--- DIAGNOSTIC RESULTS ---");
+    Logger.log(`'Asset Trigger Date' column has data in: ${foundDataCounts['Asset Trigger Date']} / ${data.length} rows.`);
+    Logger.log(`'Asset Delivery Date' column has data in: ${foundDataCounts['Asset Delivery Date']} / ${data.length} rows.`);
+    Logger.log(`'OnBoarding Done' column has data in: ${foundDataCounts['OnBoarding Done']} / ${data.length} rows.`);
+
+    if (firstRowWithData) {
+      Logger.log("\n--- EXAMPLE ROW WITH DATA ---");
+      Logger.log(`Log ID: ${firstRowWithData['Log ID']}`);
+      Logger.log(`Asset Trigger Date: ${firstRowWithData['Asset Trigger Date']}`);
+      Logger.log(`Asset Delivery Date: ${firstRowWithData['Asset Delivery Date']}`);
+      Logger.log(`OnBoarding Done: ${firstRowWithData['OnBoarding Done']}`);
+    } else {
+      Logger.log("\nNOTE: No rows were found with data in any of the specified columns.");
+    }
+
+    Logger.log("--- Diagnostic Complete ---");
+
+  } catch(e) {
+    Logger.log(`A critical error occurred during the diagnostic: ${e.message}`);
+  }
+}
+
+
+
+
+

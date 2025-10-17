@@ -1,0 +1,79 @@
+// In Backup.gs
+
+// --- CONFIGURATION ---
+const BACKUP_FOLDER_ID = "1bCH9GS5JVnZQwZx5Dj1dPD0OjT51DUSr";
+
+/**
+ * Creates a timestamped backup of the main CSV files.
+ * This function should be run by a daily time-based trigger.
+ */
+function createDailyBackups() {
+  // Array of file objects to back up. Add more here if needed.
+  const filesToBackup = [
+    { id: SUB_TASK_FILE_ID, name: "Sub_Tasks" },
+    { id: ESCALATION_LOGS_FILE_ID, name: "Escalation_Logs" },
+    { id: PAUSE_LOGS_FILE_ID, name: "Pause_Logs" },
+    { id: USERS_FILE_ID, name: "Users" }
+  ];
+
+  try {
+    const backupFolder = DriveApp.getFolderById(BACKUP_FOLDER_ID);
+    const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
+
+    filesToBackup.forEach(fileInfo => {
+      try {
+        const file = DriveApp.getFileById(fileInfo.id);
+        const backupName = `${fileInfo.name}_${timestamp}.csv`;
+        file.makeCopy(backupName, backupFolder);
+        Logger.log(`Successfully created backup: ${backupName}`);
+      } catch (e) {
+        Logger.log(`Failed to back up file ${fileInfo.name} (ID: ${fileInfo.id}). Error: ${e.message}`);
+      }
+    });
+
+    // =======================================================
+    // == NEW: CREATE AUDIT LOG & SET LAST BACKUP TIMESTAMP ==
+    // =======================================================
+    createAuditLog({ user: 'system', action: 'Data Backup', details: 'Daily backup process completed.' });
+    setSystemProperty('lastBackup', new Date().toISOString());
+    // ===================== END OF NEW CODE =====================
+
+  } catch (e) {
+    Logger.log(`CRITICAL: Could not access backup folder (ID: ${BACKUP_FOLDER_ID}). Error: ${e.message}`);
+  }
+}
+
+/**
+ * Retrieves a sorted list of backup files from the backup folder.
+ * Called by the frontend to display in the Settings tab.
+ * @returns {Array<Object>} A list of objects with file name and URL.
+ */
+function getBackupList() {
+  try {
+    // ✨ FIX PART 1: Get the email of the person viewing the settings page.
+    const userEmail = Session.getActiveUser().getEmail();
+
+    const backupFolder = DriveApp.getFolderById(BACKUP_FOLDER_ID);
+    const files = backupFolder.getFiles();
+    const backupList = [];
+    
+    while (files.hasNext()) {
+      const file = files.next();
+
+      // ✨ FIX PART 2: Grant the current user permission to view this specific file.
+      file.addViewer(userEmail);
+
+      backupList.push({
+        name: file.getName(),
+        url: file.getUrl() // ✅ This URL will now work for the user
+      });
+    }
+
+    // Sort the list with the most recent backup first
+    backupList.sort((a, b) => b.name.localeCompare(a.name));
+
+    return { success: true, data: backupList };
+  } catch (e) {
+    return { success: false, message: `Failed to retrieve backup list. Error: ${e.message}` };
+  }
+}
