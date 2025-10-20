@@ -93,13 +93,13 @@ function doPost(e) {
     if (e.parameter.secret !== WEBHOOK_SECRET) {
       return ContentService.createTextOutput("Error: Invalid secret.").setMimeType(ContentService.MimeType.TEXT);
     }
-    
+
     const postData = JSON.parse(e.postData.contents);
-    
+
     // THE FIX: The preset sends the record inside a "Row" property, not "record".
     const record = postData.Row;
     const tableName = postData.TableName;
-    
+
     let fileId;
     let primaryKey = 'Log ID';
     let columnMap;
@@ -119,7 +119,7 @@ function doPost(e) {
         Logger.log(`Webhook received data for an unknown table: ${tableName}`);
         return ContentService.createTextOutput(`Error: Unknown table '${tableName}'.`).setMimeType(ContentService.MimeType.TEXT);
     }
-    
+
     // The preset sends raw column names, so we MUST normalize them.
     const normalizedRecord = _normalizeDataArray([record], columnMap)[0];
     const recordId = normalizedRecord[primaryKey];
@@ -128,16 +128,16 @@ function doPost(e) {
       Logger.log(`Webhook for table '${tableName}' received a record without a valid Log ID. Record Data: ${JSON.stringify(record)}`);
       return ContentService.createTextOutput("Warning: Record had no Log ID.").setMimeType(ContentService.MimeType.TEXT);
     }
-    
+
     let data = readCSV(fileId);
     const recordIndex = data.findIndex(row => row[primaryKey] === recordId);
-    
+
     if (recordIndex > -1) {
       data[recordIndex] = { ...data[recordIndex], ...normalizedRecord };
     } else {
       data.push(normalizedRecord);
     }
-    
+
     // CHANGE: Use the safe writeCSV function with the master headers
     if (fileId === SUB_TASK_FILE_ID) {
       writeCSV(fileId, data, SUB_TASK_HEADERS);
@@ -147,7 +147,7 @@ function doPost(e) {
       const headers = data.length > 0 ? Object.keys(data[0]) : [];
       writeCSV(fileId, data, headers);
     }
-    
+
     return ContentService.createTextOutput("Success").setMimeType(ContentService.MimeType.TEXT);
 
   } catch (err) {
@@ -185,7 +185,7 @@ function _pushUpdateToSource(record, recordType) {
       Logger.log(`Pushing update for active task ${record['Log ID']} to Google Sheet.`);
       _updateRecordInSheet(ACTIVE_TASKS_SHEET_ID, 'Log ID', record['Log ID'], record);
     }
-  } 
+  }
   else if (recordType === 'escalation') {
       const allTasks = readCSV(SUB_TASK_FILE_ID);
       const parentTask = allTasks.find(t => t['Case ID'] === record['Related Case ID']);
@@ -261,7 +261,7 @@ function _updateRecordInSheet(sheetId, keyColumn, keyValue, newRecordData) {
             break;
         }
     }
-    
+
     if (rowIndex > -1) {
       // Row exists, update it
       const newRow = headers.map(header => newRecordData[header] || '');
@@ -315,7 +315,7 @@ function doGet(e) {
       .setTitle('OBQ Dashboard')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT);
   }
-  
+
   if (e.parameter.page === 'audit') {
     try {
       const role = getUserRole(Session.getActiveUser().getEmail());
@@ -372,7 +372,7 @@ function writeCSV(fileId, data, headers) {
     // Format the CSV content, starting with the master header row
     const csvContent = [
       headers.join(','),
-      ...data.map(row => 
+      ...data.map(row =>
         headers.map(header => {
           const value = row[header] === null || row[header] === undefined ? '' : row[header];
           // Enclose in quotes and escape existing quotes
@@ -401,7 +401,7 @@ function getUserRole(email) {
     }
 
     const users = readCSV(USERS_FILE_ID);
-    
+
     // Safely handle if the Users.csv file is empty or unreadable
     if (!users || users.length === 0) {
       Logger.log("getUserRole WARNING: Users.csv file is empty or could not be read. Returning 'User' for safety.");
@@ -415,7 +415,7 @@ function getUserRole(email) {
 
     // Make the email check case-insensitive for reliability
     const user = users.find(u => u.Email && u.Email.toLowerCase() === email.toLowerCase());
-    
+
     if (user && user.Role) {
       return user.Role;
     } else {
@@ -446,10 +446,10 @@ function getAppContext() {
 function getUserTasks(options) {
   const currentUser = Session.getActiveUser().getEmail();
   let allTasks = readCSV(SUB_TASK_FILE_ID);
-  
+
   // Initial filter for the current user
   let myTasks = allTasks.filter(task => task['User'] === currentUser);
-  
+
   const statusFilter = options && options.statusFilter ? options.statusFilter : 'All';
   const taskTypeFilter = options && options.taskTypeFilter ? options.taskTypeFilter : 'All';
 
@@ -466,8 +466,8 @@ function getUserTasks(options) {
       pauses.filter(p => !p['Pause End Time']).map(p => p['Related Case ID'])
     );
     myTasks = myTasks.filter(task => task['Status'] === 'InProgress' && activePauseCaseIds.has(task['Case ID']));
-  } else if (statusFilter !== 'All') { 
-    myTasks = myTasks.filter(task => task['Status'] === statusFilter); 
+  } else if (statusFilter !== 'All') {
+    myTasks = myTasks.filter(task => task['Status'] === statusFilter);
   }
 
   if (taskTypeFilter !== 'All') { myTasks = myTasks.filter(task => task['Task type'] === taskTypeFilter); }
@@ -482,7 +482,7 @@ function getUserTasks(options) {
     }
     return new Date(b['Start Timestamp']) - new Date(a['Start Timestamp']);
   });
-  
+
   return { success: true, data: calculateAllSLA(myTasks) };
 }
 
@@ -497,9 +497,9 @@ function getAllTasks(options) {
     const statusFilter = options.statusFilter || 'All';
     const taskTypeFilter = options.taskTypeFilter || 'All';
     const pageSize = 100;
-    
+
     let allTasks = readCSV(SUB_TASK_FILE_ID);
-    
+
     if (searchTerm) { allTasks = allTasks.filter(task => task['Case ID'] && task['Case ID'].includes(searchTerm)); }
 
     // MODIFIED: Handle derived statuses "Escalated" and "Paused"
@@ -518,9 +518,9 @@ function getAllTasks(options) {
     } else if (statusFilter !== 'All') {
       allTasks = allTasks.filter(task => task['Status'] === statusFilter);
     }
-    
+
     if (taskTypeFilter !== 'All') { allTasks = allTasks.filter(task => task['Task type'] === taskTypeFilter); }
-    
+
     const statusOrder = { 'InProgress': 1, 'Completed': 2 };
 
     allTasks.sort((a, b) => {
@@ -531,12 +531,12 @@ function getAllTasks(options) {
       }
       return new Date(b['Start Timestamp']) - new Date(a['Start Timestamp']);
     });
-    
+
     const totalPages = Math.ceil(allTasks.length / pageSize);
     const startIndex = (page - 1) * pageSize;
     const paginatedTasks = allTasks.slice(startIndex, startIndex + pageSize);
     const tasksWithDetails = calculateAllSLA(paginatedTasks);
-    
+
     return { success: true, data: tasksWithDetails, totalPages: totalPages, currentPage: page };
   } catch (e) {
     return { success: false, message: 'Failed to load tasks. Error: ' + e.toString() };
@@ -589,7 +589,7 @@ function createNewTask(taskData) {
 
     // PUSH LOGIC
     _pushUpdateToSource(newTask, 'task');
-    
+
     createAuditLog({
         action: 'Create Task',
         caseId: taskData.caseId,
@@ -620,7 +620,7 @@ function endTask(logId) {
     taskToEnd['Status'] = 'Completed';
     // FIX: Use correct format and timezone for End Timestamp
     taskToEnd['End Timestamp'] = Utilities.formatDate(new Date(), TIMEZONE, "MM/dd/yyyy HH:mm:ss");
-    
+
     writeCSV(SUB_TASK_FILE_ID, tasks, SUB_TASK_HEADERS);
 
     // PUSH LOGIC
@@ -634,10 +634,10 @@ function endTask(logId) {
     });
 
     return { success: true, message: "Task completed successfully." };
-  } catch (e) { 
-    return { success: false, message: e.toString() }; 
-  } finally { 
-    lock.releaseLock(); 
+  } catch (e) {
+    return { success: false, message: e.toString() };
+  } finally {
+    lock.releaseLock();
   }
 }
 
@@ -753,14 +753,14 @@ function updateUserRole(userData) {
     if (currentUserRole === 'Admin' && targetUserRole === 'Super Admin') {
       return { success: false, message: "Admins cannot modify the roles of Super Admins." };
     }
-    
+
     // Rule: An Admin cannot assign the Super Admin role
     if (currentUserRole === 'Admin' && userData.role === 'Super Admin') {
       return { success: false, message: "Admins cannot create new Super Admins." };
     }
 
     const userIndex = users.findIndex(u => u.Email === userData.email);
-    if (userIndex > -1) { 
+    if (userIndex > -1) {
       // Prevent a Super Admin from accidentally demoting themselves if they are the last one
       if (users[userIndex].Role === 'Super Admin' && userData.role !== 'Super Admin') {
         const superAdminCount = users.filter(u => u.Role === 'Super Admin').length;
@@ -768,15 +768,15 @@ function updateUserRole(userData) {
           return { success: false, message: "Cannot change the role of the last Super Admin." };
         }
       }
-      users[userIndex].Role = userData.role; 
+      users[userIndex].Role = userData.role;
     }
     else { users.push({ Email: userData.email, Role: userData.role }); }
-    
+
     // This is writing to the USERS file, so no SUB_TASK_HEADERS are needed.
     writeCSV(USERS_FILE_ID, users);
     return { success: true, message: `User ${userData.email} has been saved.` };
-  } catch (e) { 
-    return { success: false, message: 'Failed to save user. Error: ' + e.toString() }; 
+  } catch (e) {
+    return { success: false, message: 'Failed to save user. Error: ' + e.toString() };
   }
   finally { lock.releaseLock(); }
 }
@@ -834,7 +834,7 @@ function bulkImportData(csvContent, importType) {
     }
     const newDataArray = Utilities.parseCsv(csvContent);
     if (newDataArray.length < 2) { return { success: false, message: "Import failed: CSV has no data rows." }; }
-    const headers = newDataArray.shift().map(h => h.trim()); 
+    const headers = newDataArray.shift().map(h => h.trim());
     const cleanHeaderMap = { 'Task Type': 'Task type', 'log id': 'Log ID', 'Log Id': 'Log ID', 'case id': 'Case ID', 'Case Id': 'Case ID', 'related case id': 'Related Case ID', 'Related Case Id': 'Related Case ID' };
     const sanitizedHeaders = headers.map(h => cleanHeaderMap[h] || h);
     const newData = newDataArray.map(row => { let obj = {}; sanitizedHeaders.forEach((header, index) => { obj[header] = row[index]; }); return obj; });
@@ -912,8 +912,8 @@ function setFlagTimestamp(caseId, flagType) {
             task['Flag Asset Action'] = timestamp;
             wasUpdated = true;
           }
-        } 
-        
+        }
+
         // Case 2: "Asset Delivered" button is clicked
         else if (flagType === 'Asset Delivered Timestamp') {
           // Update the single primary date column with the full timestamp
@@ -949,11 +949,11 @@ function setFlagTimestamp(caseId, flagType) {
     if (updatedTasks.length > 0) {
       // Save all changes to the CSV file.
       writeCSV(SUB_TASK_FILE_ID, allTasks, SUB_TASK_HEADERS);
-      
+
       // Sync only the changed tasks to the Google Sheet.
       Logger.log(`Pushing flag update for ${updatedTasks.length} tasks in Case ID ${caseId}...`);
       updatedTasks.forEach(task => {
-        _pushUpdateToSource(task, 'task'); 
+        _pushUpdateToSource(task, 'task');
       });
 
       return { success: true, message: `Flag '${flagType}' has been timestamped for Case ${caseId}.` };
@@ -972,7 +972,7 @@ function updateTimestamps(payload) {
   if (role !== 'Admin' && role !== 'Super Admin') {
     return { success: false, message: "Access Denied." };
   }
- 
+
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
@@ -980,7 +980,7 @@ function updateTimestamps(payload) {
     let allTasks = readCSV(SUB_TASK_FILE_ID);
     let allEscalations = readCSV(ESCALATION_LOGS_FILE_ID);
     let allPauses = readCSV(PAUSE_LOGS_FILE_ID);
-    
+
     payload.forEach(update => {
       let logDetails = '';
       let caseIdForLog = 'N/A';
@@ -999,13 +999,13 @@ function updateTimestamps(payload) {
             createAuditLog({ user, action: 'Update Timestamps', caseId: caseIdForLog, targetId: update.id, details: logDetails });
           }
           break;
-        
+
         case 'case_flag':
-            allTasks.forEach(task => { 
-                if (task['Case ID'] === update.id) { 
-                    Object.assign(task, update.data); 
+            allTasks.forEach(task => {
+                if (task['Case ID'] === update.id) {
+                    Object.assign(task, update.data);
                     _pushUpdateToSource(task, 'task');
-                } 
+                }
             });
             break;
 
@@ -1039,12 +1039,12 @@ function updateTimestamps(payload) {
           _pushUpdateToSource(recordToPush, recordType);
       }
     });
-    
+
     // CHANGE 9: Update this call to use the master headers.
     writeCSV(SUB_TASK_FILE_ID, allTasks, SUB_TASK_HEADERS);
     writeCSV(ESCALATION_LOGS_FILE_ID, allEscalations);
     writeCSV(PAUSE_LOGS_FILE_ID, allPauses);
-    
+
     return { success: true, message: 'Timestamps updated successfully.' };
   } catch (e) {
     return { success: false, message: 'Failed to update timestamps. Error: ' + e.toString() };
@@ -1066,7 +1066,7 @@ function startEscalation(caseId, reasons) {
 
     const escalations = readCSV(ESCALATION_LOGS_FILE_ID);
     const now = new Date();
-    
+
     const newLog = {
       'Log ID': `ESC-${now.getTime()}-${Math.floor(Math.random() * 1000)}`,
       'Related Case ID': caseId,
@@ -1076,11 +1076,11 @@ function startEscalation(caseId, reasons) {
       'Escalation End Time': '',
       // --- THIS IS THE CHANGE ---
       // The function now accepts a 'reasons' argument and saves it to the 'Escalation Reasons' column.
-      'Escalation Reasons': reasons || '' 
+      'Escalation Reasons': reasons || ''
     };
 
     escalations.push(newLog);
-    
+
     // For best practice, you should define an ESCALATION_LOGS_HEADERS constant in code.gs
     // and pass it here to ensure a safe write, just like you do for SUB_TASK_HEADERS.
     writeCSV(ESCALATION_LOGS_FILE_ID, escalations);
@@ -1105,7 +1105,7 @@ function stopEscalation(caseId) {
     if (activeEscalation) {
       activeEscalation['Escalation End Time'] = Utilities.formatDate(new Date(), TIMEZONE, "MM/dd/yyyy HH:mm:ss"); // FIXED FORMAT
       writeCSV(ESCALATION_LOGS_FILE_ID, escalations);
-      
+
       _pushUpdateToSource(activeEscalation, 'escalation');
 
       return { success: true, message: `Escalation for case ${caseId} has been stopped.` };
@@ -1260,7 +1260,7 @@ function getDashboardDataFromCSV(filters = {}) {
         const allSubTaskValues = readCSV(SUB_TASK_FILE_ID);
         const escalationData = readCSV(ESCALATION_LOGS_FILE_ID);
         const pauseData = readCSV(PAUSE_LOGS_FILE_ID);
-        
+
         const allCases = new Map();
         allSubTaskValues.forEach(row => {
             const caseId = (row['Case ID'] || "").toString().trim();
@@ -1277,57 +1277,64 @@ function getDashboardDataFromCSV(filters = {}) {
         // --- UTILIZATION LOGIC HAS BEEN REMOVED ---
 
         let kpis = {};
-        
+
         const handledCaseIds = new Set();
+        const completedCasesInFilter = new Set();
+        const inProgressCaseIds = new Set();
+
         allCases.forEach((caseData, caseId) => {
             if (filters.market && caseData.market !== filters.market) return;
+            let caseAddedToHandled = false;
+            let caseAddedToCompleted = false;
+            let caseAddedToInProgress = false;
+
             for (const task of caseData.tasks) {
                 if (filters.taskType && (task['Task type'] || "").toString().trim() !== filters.taskType) continue;
+
                 const taskStart = dashboard_assistantParseDateString(task['Start Timestamp']);
-                if ((filterStartDate && taskStart >= filterStartDate && taskStart <= filterEndDate) || (!filterStartDate && taskStart)) {
-                    handledCaseIds.add(caseId);
-                    break;
+                const taskEnd = dashboard_assistantParseDateString(task['End Timestamp']);
+
+                // Handled Cases Logic
+                if (!caseAddedToHandled) {
+                    if (taskStart && (!filterStartDate || (taskStart >= filterStartDate && taskStart <= filterEndDate))) {
+                        handledCaseIds.add(caseId);
+                        caseAddedToHandled = true;
+                    }
                 }
+
+                // Completed Cases Logic
+                if (!caseAddedToCompleted) {
+                    if (taskEnd && (!filterStartDate || (taskEnd >= filterStartDate && taskEnd <= filterEndDate))) {
+                         completedCasesInFilter.add(caseId);
+                         caseAddedToCompleted = true;
+                    }
+                }
+
+                // In-Progress Cases Logic
+                if (!caseAddedToInProgress) {
+                     if (taskStart && (!filterStartDate || (taskStart >= filterStartDate && taskStart <= filterEndDate)) && !taskEnd) {
+                        inProgressCaseIds.add(caseId);
+                        caseAddedToInProgress = true;
+                    }
+                }
+
+                if (caseAddedToHandled && caseAddedToCompleted && caseAddedToInProgress) break;
             }
         });
+
         kpis.totalHandledCases = handledCaseIds.size;
+        kpis.totalCases = completedCasesInFilter.size;
+        kpis.inProgressTotalCases = inProgressCaseIds.size;
+
 
         const { filteredCases, matchingTasksMap } = old_dashboard_filterCases(allCases, filters);
 
-        const inProgressCaseIds = new Set();
-        allCases.forEach((caseData, caseId) => {
-            if (filters.market && caseData.market !== filters.market) return;
-            for (const task of caseData.tasks) {
-                if (filters.taskType && (task['Task type'] || "").toString().trim() !== filters.taskType) continue;
-                const taskStart = dashboard_assistantParseDateString(task['Start Timestamp']);
-                const taskEnd = dashboard_assistantParseDateString(task['End Timestamp']);
-                let isConsideredInProgress = false;
-                if (filterStartDate && filterEndDate) {
-                    if (taskStart && taskStart >= filterStartDate && taskStart <= filterEndDate && (!taskEnd || taskEnd > filterEndDate)) isConsideredInProgress = true;
-                } else if (!filterStartDate && !filterEndDate && !taskEnd) {
-                    if ((task['Status'] || '').trim().toLowerCase() !== 'completed') isConsideredInProgress = true;
-                }
-                if (isConsideredInProgress) {
-                    inProgressCaseIds.add(caseId);
-                    break;
-                }
-            }
-        });
-        
-        const completedCasesInFilter = new Set();
-        filteredCases.forEach((caseData, caseId) => {
-            const isCompleted = caseData.tasks.every(t => (t['Status'] || "").trim().toLowerCase() === 'completed');
-            if (isCompleted) completedCasesInFilter.add(caseId);
-            caseData.status = isCompleted ? "Completed" : "In Progress";
-        });
-        kpis.inProgressTotalCases = inProgressCaseIds.size;
-        kpis.totalCases = completedCasesInFilter.size;
 
         const allEscalatedCaseIds = new Set(escalationData.map(row => (row['Related Case ID'] || "").toString().trim()));
         const escalatedCasesInFilter = new Set([...handledCaseIds].filter(caseId => allEscalatedCaseIds.has(caseId)));
         kpis.casesWithEscalations = escalatedCasesInFilter.size;
         kpis.casesWithoutEscalations = kpis.totalHandledCases - kpis.casesWithEscalations;
-        
+
         const avgEscalationDurationMap = new Map();
         const caseIdsForAvgEscTime = new Set();
         escalationData.forEach(eRow => {
@@ -1345,7 +1352,7 @@ function getDashboardDataFromCSV(filters = {}) {
         let totalAvgEscalationMillis = 0;
         avgEscalationDurationMap.forEach(duration => totalAvgEscalationMillis += duration);
         kpis.avgEscalatedTimeMins = caseIdsForAvgEscTime.size > 0 ? (totalAvgEscalationMillis / caseIdsForAvgEscTime.size / 60000).toFixed(2) : "0.00";
-        
+
         const cases = filteredCases;
         const ahtEscalationOverlapMap = new Map();
         escalationData.forEach(eRow => {
@@ -1366,7 +1373,7 @@ function getDashboardDataFromCSV(filters = {}) {
                 }
             }
         });
-        
+
         const pauseMap = new Map();
         pauseData.forEach(pRow => {
             const caseId = (pRow['Related Case ID'] || "").toString().trim();
@@ -1376,7 +1383,7 @@ function getDashboardDataFromCSV(filters = {}) {
                 if (start && end && end > start) pauseMap.set(caseId, (pauseMap.get(caseId) || 0) + (end.getTime() - start.getTime()));
             }
         });
-        
+
         cases.forEach((caseData, caseId) => {
             caseData.isEscalated = escalatedCasesInFilter.has(caseId);
             let earliestStart = null, latestEnd = null;
@@ -1389,14 +1396,14 @@ function getDashboardDataFromCSV(filters = {}) {
             caseData.earliestStartDate = earliestStart;
             caseData.latestEndDate = latestEnd;
         });
-        
+
         const kpiFilter = filters.kpiFilter;
         let sums = { postObqAHTMillis: 0, assetDeliveryAHTMillis: 0, integrationAHTMillis: 0, menuCreationAHTMillis: 0, adminCreationAHTMillis: 0, postObqAHTWithEscMillis: 0, assetDeliveryAHTWithEscMillis: 0, integrationAHTWithEscMillis: 0, menuCreationAHTWithEscMillis: 0, adminCreationAHTWithEscMillis: 0, postObqAHTWithoutEscMillis: 0, assetDeliveryAHTWithoutEscMillis: 0, integrationAHTWithoutEscMillis: 0, menuCreationAHTWithoutEscMillis: 0, adminCreationAHTWithoutEscMillis: 0, integrationTATMillis: 0, assetDeliveryTATMillis: 0, assetTriggeredAHTMillis: 0, adhocProcessAHTMillis: 0, adhocAdminAHTMillis: 0 };
         let counts = { postObqAHT: 0, assetDeliveryAHT: 0, integrationAHT: 0, menuCreationAHT: 0, adminCreationAHT: 0, postObqAHTWithEsc: 0, assetDeliveryAHTWithEsc: 0, integrationAHTWithEsc: 0, menuCreationAHTWithEsc: 0, adminCreationAHTWithEsc: 0, postObqAHTWithoutEsc: 0, assetDeliveryAHTWithoutEsc: 0, integrationAHTWithoutEsc: 0, menuCreationAHTWithoutEsc: 0, adminCreationAHTWithoutEsc: 0, integrationTAT: 0, assetDeliveryTAT: 0, assetTriggeredAHT: 0, casesMetSLA: 0, integrationPending: 0, adhocProcessAHT: 0, adhocAdminAHT: 0 };
         const integrationCaseIds = new Set();
         const taskTypeChartAggregates = {};
         const adhocCounts = {};
-        
+
         cases.forEach((caseData, caseId) => {
             let hasIntegration = false, caseSlaMet = true;
             const tasksToProcess = matchingTasksMap.get(caseId) || [];
@@ -1412,7 +1419,7 @@ function getDashboardDataFromCSV(filters = {}) {
             });
             if (completedCasesInFilter.has(caseId) && caseSlaMet) counts.casesMetSLA++;
             if (hasIntegration) integrationCaseIds.add(caseId);
-            
+
             tasksToProcess.forEach(task => {
                 const taskType = (task['Task type'] || "").toString().trim();
                 if (!taskType) return;
@@ -1429,14 +1436,14 @@ function getDashboardDataFromCSV(filters = {}) {
                     agg.tatMillis += rawDuration; agg.tatCount++;
                     if (aht > 0) { agg.ahtMillis += aht; agg.ahtCount++; }
                     if (caseData.isEscalated) agg.escCount++; else agg.nonEscCount++;
-                    
+
                     const typeConfig = { "Post OBQ": 'postObq', "Asset Delivery": 'assetDelivery', "Integration": 'integration', "Menu Creation": 'menuCreation', "Admin Creation": 'adminCreation', "Adhoc-Process": 'adhocProcess', "Adhoc-Admin": 'adhocAdmin' };
                     const base = typeConfig[taskType];
                     if (base && specificAht > 0) {
                         sums[`${base}AHTMillis`] += specificAht;
                         counts[`${base}AHT`]++;
                         if (!base.includes('adhoc')) {
-                            if (allEscalatedCaseIds.has(caseId)) { sums[`${base}AHTWithEscMillis`] += specificAht; counts[`${base}AHTWithEsc`]++; } 
+                            if (allEscalatedCaseIds.has(caseId)) { sums[`${base}AHTWithEscMillis`] += specificAht; counts[`${base}AHTWithEsc`]++; }
                             else { sums[`${base}AHTWithoutEscMillis`] += specificAht; counts[`${base}AHTWithoutEsc`]++; }
                         }
                     }
@@ -1456,14 +1463,14 @@ function getDashboardDataFromCSV(filters = {}) {
                 if (tag) adhocCounts[tag] = (adhocCounts[tag] || 0) + 1;
             }
         });
-        
+
         kpis.integrationPendingCases = Array.from(inProgressCaseIds).filter(id => (allCases.get(id).tasks.some(t => t['Task type'] === 'Integration'))).length;
         kpis.avgAssetTriggeredAHTMins = counts.assetTriggeredAHT > 0 ? (sums.assetTriggeredAHTMillis / counts.assetTriggeredAHT / 60000).toFixed(2) : "0.00";
         kpis.avgOnboardingDoneTAT = completedCasesInFilter.size > 0 ? ((counts.casesMetSLA / completedCasesInFilter.size) * 100).toFixed(1) + "%" : "N/A";
         kpis.avgIntegrationTAT = counts.integrationTAT > 0 ? (sums.integrationTATMillis / counts.integrationTAT / 86400000).toFixed(2) : "0.00";
         kpis.avgAssetDeliveryTAT = counts.assetDeliveryTAT > 0 ? (sums.assetDeliveryTATMillis / counts.assetDeliveryTAT / 86400000).toFixed(2) : "0.00";
         kpis.totalCasesWithIntegration = integrationCaseIds.size;
-        
+
         const obqAhtResults = getObqAhtKpi(filters, allSubTaskValues, pauseData, escalationData);
         const ahtKpiTypes = ["postObq", "assetDelivery", "integration", "menuCreation", "adminCreation", "adhocProcess", "adhocAdmin"];
         ahtKpiTypes.forEach(type => {
@@ -1474,7 +1481,7 @@ function getDashboardDataFromCSV(filters = {}) {
                 kpis[`${type}AHTMinsWithoutEscalations`] = counts[`${type}AHTWithoutEsc`] > 0 ? (sums[`${type}AHTWithoutEscMillis`] / counts[`${type}AHTWithoutEsc`] / 60000).toFixed(2) : "0.00";
             }
         });
-        
+
         kpis.avgObqAHTMins = obqAhtResults.avgObqAHTMins;
         kpis.obqAHTMinsWithEscalations = obqAhtResults.obqAHTMinsWithEscalations;
         kpis.obqAHTMinsWithoutEscalations = obqAhtResults.obqAHTMinsWithoutEscalations;
@@ -1482,7 +1489,7 @@ function getDashboardDataFromCSV(filters = {}) {
         const uniqueMarkets = new Set(allSubTaskValues.map(r => (r['Market'] || "").toString().trim()).filter(Boolean));
         const uniqueTaskTypes = new Set(allSubTaskValues.map(r => (r['Task type'] || "").toString().trim()).filter(Boolean));
         const dropdownOptions = { markets: Array.from(uniqueMarkets).sort(), taskTypes: Array.from(uniqueTaskTypes).sort() };
-        
+
         let tableCaseIds;
         const obqKpiFilters = ['avgObqAHTMins', 'obqAHTMinsWithEscalations', 'obqAHTMinsWithoutEscalations'];
         if (obqKpiFilters.includes(kpiFilter)) tableCaseIds = obqAhtResults.caseIdsForTable;
@@ -1490,7 +1497,7 @@ function getDashboardDataFromCSV(filters = {}) {
         else if (kpiFilter === 'inProgressTotalCases') tableCaseIds = inProgressCaseIds;
         else if (kpiFilter === 'totalHandledCases') tableCaseIds = handledCaseIds;
         else tableCaseIds = new Set(filteredCases.keys());
-        
+
         const tableData = [];
         tableCaseIds.forEach(caseId => {
             const caseData = allCases.get(caseId);
@@ -1504,18 +1511,18 @@ function getDashboardDataFromCSV(filters = {}) {
                 });
             }
         });
-        
+
         const chartData = {};
         Object.keys(taskTypeChartAggregates).forEach(taskType => {
             const agg = taskTypeChartAggregates[taskType];
             chartData[taskType] = { avgTatHours: agg.tatCount > 0 ? (agg.tatMillis / agg.tatCount / 3600000) : 0, avgTatDays: agg.tatCount > 0 ? (agg.tatMillis / agg.tatCount / 86400000) : 0, avgAhtMins: agg.ahtCount > 0 ? (agg.ahtMillis / agg.ahtCount / 60000) : 0, escCount: agg.escCount, nonEscCount: agg.nonEscCount };
         });
-        
+
         return {
-            kpis: kpis, 
-            dropdownOptions: dropdownOptions, 
-            tableData: tableData, 
-            chartData: chartData, 
+            kpis: kpis,
+            dropdownOptions: dropdownOptions,
+            tableData: tableData,
+            chartData: chartData,
             adhocCounts: adhocCounts,
             lastRefreshed: new Date().toLocaleString(undefined, { timeZone: Session.getScriptTimeZone() }),
             error: null
@@ -1540,12 +1547,12 @@ function runReportGenerator() {
 
   try {
     // This function will now return an object containing the quarantineUrl
-    const result = generateReportAndQuarantineAbnormalTasks(); 
+    const result = generateReportAndQuarantineAbnormalTasks();
 
     const reportUrl = SpreadsheetApp.openById(REPORT_SPREADSHEET_ID).getUrl();
 
-    return { 
-      success: true, 
+    return {
+      success: true,
       reportUrl: reportUrl,
       quarantineUrl: result ? result.quarantineUrl : null,
       message: "Report generation complete!"
@@ -1567,7 +1574,7 @@ function exportUtilizationReport() {
     const dashboardSheet = spreadsheet.getSheets()[0];
     dashboardSheet.setName('Dashboard');
     const sourceDataSheet = spreadsheet.insertSheet('Source Data');
-    
+
     // --- 1. SELF-CONTAINED DATA FETCH & PREPARATION ---
     const allTasks = readCSV(SUB_TASK_FILE_ID);
     if (allTasks.length === 0) {
@@ -1588,7 +1595,7 @@ function exportUtilizationReport() {
     dashboardSheet.setGridlines(false);
     const fullRange = dashboardSheet.getRange('A1:Z100');
     fullRange.setBackground('#F0F8F5').setFontFamily('Inter');
-    
+
     dashboardSheet.getRange('B2:J2').merge().setValue('Workforce Utilization Dashboard')
       .setFontSize(24).setFontWeight('bold').setHorizontalAlignment('center').setFontColor('#00B14F');
 
@@ -1620,17 +1627,17 @@ function exportUtilizationReport() {
     const inProgressStartRow = 10 + (reportData.utilizationByMarket_Completed.length || 1);
     dashboardSheet.getRange(inProgressStartRow, 2).setValue("Time Spent on In-Progress Tasks");
     dashboardSheet.getRange(inProgressStartRow, 2, 1, 4).merge().setFontWeight('bold').setFontSize(14);
-    
+
     dashboardSheet.getRange(inProgressStartRow + 1, 2, 1, 4).setValues([inProgressHeaders])
       .setBackground('#f3f3f3').setFontWeight('bold').setBorder(true, true, true, true, null, null, '#6B7280', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
-      
+
     if (reportData.utilizationByMarket_InProgress.length > 0) {
         const inProgressRows = reportData.utilizationByMarket_InProgress.map(marketInfo => [
             marketInfo.market, marketInfo.headcount, marketInfo.taskCount, marketInfo.productiveHours.toFixed(2)
         ]);
         dashboardSheet.getRange(inProgressStartRow + 2, 2, inProgressRows.length, inProgressHeaders.length).setValues(inProgressRows);
     }
-    
+
     const legendRow = inProgressStartRow + 2 + (reportData.utilizationByMarket_InProgress.length || 1);
     dashboardSheet.getRange(legendRow, 2, 1, 4).merge().setValue(`In-progress data calculated as of: ${new Date(reportData.inProgressEndDate).toLocaleString()}`).setItalic(true).setFontSize(9);
 
@@ -1638,7 +1645,7 @@ function exportUtilizationReport() {
     // --- 6. CHARTS & SLICERS (Simplified & Robust) ---
     // Slicers are tricky with complex data sources. We will omit them in this version to guarantee export success.
     // A chart can be added similarly if needed, but the primary goal is a successful data export.
-    
+
     dashboardSheet.autoResizeColumns(2, 10);
     SpreadsheetApp.flush();
     return spreadsheet.getUrl();
@@ -1660,7 +1667,7 @@ function exportUtilizationReport() {
  */
 function debugCsvContents() {
   Logger.log('--- Starting CSV Content Debug ---');
-  
+
   try {
     // Check Sub Task CSV
     const subTaskFile = DriveApp.getFileById(SUB_TASK_FILE_ID);
@@ -1686,7 +1693,7 @@ function debugCsvContents() {
   } catch (e) {
     Logger.log(`A critical error occurred during debug: ${e.message}`);
   }
-  
+
   Logger.log('--- CSV Content Debug Finished ---');
 }
 
@@ -1722,7 +1729,7 @@ function dashboard_filterCases_(allCases, filters) {
     const { startDate, endDate, market, taskType } = filters;
     const filteredCases = new Map();
     const matchingTasksMap = new Map();
-    
+
     const filterStartDate = startDate ? dashboard_assistantParseDateDashed(startDate) : null;
     const filterEndDate = endDate ? dashboard_assistantParseDateDashed(endDate) : null;
     if (filterStartDate) filterStartDate.setHours(0, 0, 0, 0);
@@ -1746,7 +1753,7 @@ function dashboard_filterCases_(allCases, filters) {
             if (!taskStart) continue;
 
             const taskEnd = dashboard_assistantParseDateString(task['End Timestamp']);
-            
+
             // REPLACE WITH THIS BLOCK
 let isDateMatch = false;
 
@@ -1803,7 +1810,7 @@ function dashboard_assistantParseDateString(dateStr) {
         }
         return null;
     }
-    
+
     dateStr = dateStr.trim();
     if (dateStr === "") return null;
 
@@ -1852,7 +1859,7 @@ function old_dashboard_filterCases(allCases, filters) {
             }
             const taskStart = dashboard_assistantParseDateString(task['Start Timestamp']);
             const taskEnd = dashboard_assistantParseDateString(task['End Timestamp']);
-            
+
             let isDateMatch = false;
 
             // This is the quirky logic from the old dashboard that we are replicating
@@ -1912,7 +1919,7 @@ function getObqAhtKpi(filters, allSubTaskValues, pauseData, escalationData) {
     });
     const ahtEscalationOverlapMap = new Map();
     const allEscalatedCaseIds = new Set(escalationData.map(r => r['Related Case ID'])); // CORRECTED: Get all escalated IDs first
-    
+
     cases.forEach((caseData, caseId) => {
       if (!allEscalatedCaseIds.has(caseId)) return; // Skip if case has no escalations at all
 
@@ -1977,34 +1984,47 @@ function getObqAhtKpi(filters, allSubTaskValues, pauseData, escalationData) {
 // RESTORED: Dashboard Helper Functions
 // =================================================================
 function exportDataToSheet(headers, rows) {
-  try {
-    const userEmail = Session.getActiveUser().getEmail();
-    const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH'h'mm'm'");
-    const sheetName = `Dashboard Export ${timestamp}`;
-    const newSpreadsheet = SpreadsheetApp.create(sheetName);
-    const sheet = newSpreadsheet.getSheets()[0];
-    const newFileId = newSpreadsheet.getId();
+    try {
+        const userEmail = Session.getActiveUser().getEmail();
+        const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH'h'mm'm'");
+        const sheetName = `Dashboard Export ${timestamp}`;
+        const newSpreadsheet = SpreadsheetApp.create(sheetName);
+        const sheet = newSpreadsheet.getSheets()[0];
+        const newFileId = newSpreadsheet.getId();
 
-    Drive.Permissions.insert({
-      'role': 'writer',
-      'type': 'user',
-      'value': userEmail
-    }, newFileId, {
-      'sendNotificationEmails': false
-    });
+        Drive.Permissions.insert({
+            'role': 'writer',
+            'type': 'user',
+            'value': userEmail
+        }, newFileId, {
+            'sendNotificationEmails': false
+        });
 
-    sheet.appendRow(headers);
-    if (rows && rows.length > 0) {
-      sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
+        sheet.appendRow(headers);
+
+        if (rows && rows.length > 0) {
+            const formattedRows = rows.map(row => {
+                const timestampIndex = headers.indexOf('End Timestamp');
+                const createdIndex = headers.indexOf('Created');
+                if (timestampIndex !== -1 && row[timestampIndex]) {
+                    row[timestampIndex] = Utilities.formatDate(new Date(row[timestampIndex]), TIMEZONE, 'MM/dd/yyyy HH:mm:ss');
+                }
+                if (createdIndex !== -1 && row[createdIndex]) {
+                    row[createdIndex] = Utilities.formatDate(new Date(row[createdIndex]), TIMEZONE, 'MM/dd/yyyy HH:mm:ss');
+                }
+                return row;
+            });
+            sheet.getRange(2, 1, formattedRows.length, headers.length).setValues(formattedRows);
+        }
+
+        sheet.getRange(1, 1, 1, headers.length).setFontWeight("bold");
+        sheet.autoResizeColumns(1, headers.length);
+
+        return newSpreadsheet.getUrl();
+    } catch (e) {
+        Logger.log(`CRITICAL Error in exportDataToSheet: ${e.toString()}`);
+        return null;
     }
-    sheet.getRange(1, 1, 1, headers.length).setFontWeight("bold");
-    sheet.autoResizeColumns(1, headers.length);
-
-    return newSpreadsheet.getUrl();
-  } catch (e) {
-    Logger.log(`CRITICAL Error in exportDataToSheet: ${e.toString()}`);
-    return null;
-  }
 }
 
 function getKpiCalculationReport(filters, kpiId) {
@@ -2123,7 +2143,7 @@ function debugCaseStatus() {
       Logger.log(`No tasks found for Case ID: ${caseIdToDebug}`);
     } else {
       Logger.log(`Found ${caseTasks.length} task(s) for Case ID: ${caseIdToDebug}. Here is the raw data from the CSV:`);
-      
+
       caseTasks.forEach((task, index) => {
         Logger.log(`\n--- Task ${index + 1} ---`);
         Logger.log(`Task Type: ${task['Task type']}`);
@@ -2135,7 +2155,7 @@ function debugCaseStatus() {
   } catch (e) {
     Logger.log(`An error occurred during the debug function: ${e.message}`);
   }
-  
+
   Logger.log(`--- Debug Finished ---`);
 }
 
@@ -2194,24 +2214,24 @@ function fixInconsistentStatuses() {
 function exportUtilizationReport(reportData) {
   try {
     const spreadsheet = SpreadsheetApp.create('Utilization by Market Report - ' + new Date().toLocaleDateString());
-    
+
     // --- PART 1: Create the Static, Beautified Report Sheet ---
     const reportSheet = spreadsheet.getSheets()[0];
     reportSheet.setName('Market Utilization Report');
-    
+
     reportSheet.getRange('A1').setValue('Market Utilization Report').setFontWeight('bold').setFontSize(14);
-    
+
     // Set Headers
     const headers = reportData.headers;
     reportSheet.getRange(3, 1, 1, headers.length).setValues([headers]).setFontWeight('bold').setBackground('#f3f3f3');
     reportSheet.setFrozenRows(3);
-    
+
     // Set Data Rows
     const dataRows = reportData.rows;
     if (dataRows.length > 0) {
       reportSheet.getRange(4, 1, dataRows.length, headers.length).setValues(dataRows);
     }
-    
+
     // Beautify the report sheet
     const utilColumnIndex = headers.indexOf('Utilization') + 1;
     if (utilColumnIndex > 0) {
@@ -2231,7 +2251,7 @@ function exportUtilizationReport(reportData) {
     calculatorSheet.getRange('A4').setValue('Global Inputs:').setFontWeight('bold');
     calculatorSheet.getRange('B4').setValue('Workdays in Period:').setFontWeight('bold');
     calculatorSheet.getRange('C4').setBackground('#fff2cc').setNote('Enter the number of working days (e.g., 22).');
-    
+
     // Set up the table headers
     calculatorSheet.getRange(6, 1, 1, headers.length).setValues([headers]).setFontWeight('bold').setBackground('#f3f3f3');
     calculatorSheet.setFrozenRows(6);
@@ -2252,7 +2272,7 @@ function exportUtilizationReport(reportData) {
       calculatorSheet.getRange(`G${i}`).setFormula(`=B${i}*C$4*C${i}*(1-0.15)`).setNumberFormat('0.00'); // Available Hours
       calculatorSheet.getRange(`I${i}`).setFormula(`=IFERROR(H${i}/G${i}, 0)`).setNumberFormat('0%'); // Utilization
     }
-    
+
     // Beautify calculator sheet
     calculatorSheet.getRange("I:I").setBackground('#d9ead3');
     calculatorSheet.autoResizeColumns(1, headers.length);
@@ -2272,10 +2292,10 @@ function exportUtilizationReport(reportData) {
     explanationSheet.getRange('A7').setValue('Utilization').setFontWeight('bold');
     explanationSheet.getRange('B7').setValue('The percentage of available hours that were spent on productive tasks. (Productive Hours / Available Hours)');
     explanationSheet.autoResizeColumns(1, 2);
-    
+
     // Activate the main report sheet for the user
     spreadsheet.setActiveSheet(reportSheet);
-    
+
     return spreadsheet.getUrl();
   } catch (e) {
     Logger.log(`CRITICAL Error in exportUtilizationReport: ${e.toString()}`);
@@ -2332,7 +2352,7 @@ function calculateBusinessProductiveMillis(taskStart, taskEnd, casePauses, caseE
                     });
                     return totalDeduction;
                 };
-                
+
                 deductionMillisThisDay += calculateDeductions(casePauses);
                 deductionMillisThisDay += calculateDeductions(caseEscalations);
 
@@ -2342,7 +2362,7 @@ function calculateBusinessProductiveMillis(taskStart, taskEnd, casePauses, caseE
         // Move to the next day
         current.setDate(current.getDate() + 1);
     }
-    
+
     // Apply 15% shrinkage rate to the final calculated time
     return netMillis * (1 - 0.15);
 }
