@@ -1978,20 +1978,32 @@ function getObqAhtKpi(filters, allSubTaskValues, pauseData, escalationData) {
 // =================================================================
 function exportDataToSheet(headers, rows) {
   try {
-      const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH'h'mm'm'");
-      const sheetName = `Dashboard Export ${timestamp}`;
-      const newSpreadsheet = SpreadsheetApp.create(sheetName);
-      const sheet = newSpreadsheet.getSheets()[0];
-      sheet.appendRow(headers);
-      if (rows && rows.length > 0) {
-          sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
-      }
-      sheet.getRange(1, 1, 1, headers.length).setFontWeight("bold");
-      sheet.autoResizeColumns(1, headers.length);
-      return newSpreadsheet.getUrl();
+    const userEmail = Session.getActiveUser().getEmail();
+    const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH'h'mm'm'");
+    const sheetName = `Dashboard Export ${timestamp}`;
+    const newSpreadsheet = SpreadsheetApp.create(sheetName);
+    const sheet = newSpreadsheet.getSheets()[0];
+    const newFileId = newSpreadsheet.getId();
+
+    Drive.Permissions.insert({
+      'role': 'writer',
+      'type': 'user',
+      'value': userEmail
+    }, newFileId, {
+      'sendNotificationEmails': false
+    });
+
+    sheet.appendRow(headers);
+    if (rows && rows.length > 0) {
+      sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
+    }
+    sheet.getRange(1, 1, 1, headers.length).setFontWeight("bold");
+    sheet.autoResizeColumns(1, headers.length);
+
+    return newSpreadsheet.getUrl();
   } catch (e) {
-      Logger.log(`CRITICAL Error in exportDataToSheet: ${e.toString()}`);
-      return null;
+    Logger.log(`CRITICAL Error in exportDataToSheet: ${e.toString()}`);
+    return null;
   }
 }
 
@@ -2334,4 +2346,3 @@ function calculateBusinessProductiveMillis(taskStart, taskEnd, casePauses, caseE
     // Apply 15% shrinkage rate to the final calculated time
     return netMillis * (1 - 0.15);
 }
-
