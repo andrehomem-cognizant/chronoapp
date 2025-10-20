@@ -729,7 +729,7 @@ function deleteTask(logId, caseId, taskType) {
 
 function getUsersAndRoles() {
   const role = getUserRole(Session.getActiveUser().getEmail());
-  if (role !== 'Super Admin') { return { success: false, message: "Access Denied." }; }
+  if (role !== 'Admin' && role!== 'Super Admin') { return { success: false, message: "Access Denied." }; }
   const users = readCSV(USERS_FILE_ID);
   return { success: true, data: users };
 }
