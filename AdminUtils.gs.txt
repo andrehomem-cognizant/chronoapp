@@ -1,6 +1,6 @@
 /**
  * ONE-TIME RESET FUNCTION (CORRECTED AND FULLY SAFE)
- * Reads all data from a specified source spreadsheet and completely OVERWRITES the 
+ * Reads all data from a specified source spreadsheet and completely OVERWRITES the
  * web app's main CSV files.
  * THIS VERSION IS NOW SAFE FOR ALL FILES: It uses master header lists to guarantee
  * that the column order and names in all destination CSVs are never changed.
@@ -15,17 +15,17 @@ function resetAndImportFromSourceSheet() {
   // --- MASTER HEADER LISTS FOR CSV FILES ---
   // Note: For best practice, these constants should eventually be moved to code.gs alongside SUB_TASK_HEADERS.
   const ESCALATION_LOGS_HEADERS = [
-    'Log ID', 'Related Case ID', 'Market', 'Task Type', 
+    'Log ID', 'Related Case ID', 'Market', 'Task Type',
     'Escalation Start Time', 'Escalation End Time'
   ];
   const PAUSE_LOGS_HEADERS = [
-    'Log ID', 'Related Case ID', 'Market', 'Task type', 
+    'Log ID', 'Related Case ID', 'Market', 'Task type',
     'Pause Start Time', 'Pause End Time'
   ];
   // ---------------------------------------------
 
   Logger.log('Starting data reset and import process...');
-  
+
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
 
@@ -37,7 +37,7 @@ function resetAndImportFromSourceSheet() {
     if (taskSheet) {
       const taskData = taskSheet.getDataRange().getValues();
       if (taskData.length > 1) {
-        const taskHeaders = taskData.shift(); 
+        const taskHeaders = taskData.shift();
         const taskObjects = taskData.map(row => {
           let obj = {};
           taskHeaders.forEach((header, index) => {
@@ -50,7 +50,7 @@ function resetAndImportFromSourceSheet() {
         const normalizedTaskObjects = taskObjects.map(obj => {
           const newObj = {};
           const headerMap = { 'Task Type': 'Task type' }; // Keep this for compatibility
-          
+
           for (const key in obj) {
             const newKey = headerMap[key] || key;
             newObj[newKey] = obj[key];
@@ -59,7 +59,7 @@ function resetAndImportFromSourceSheet() {
         });
 
         Logger.log(`Found ${normalizedTaskObjects.length} task records in the source sheet. Overwriting destination CSV...`);
-        
+
         // This is the SAFE write operation using the master header list from code.gs
         writeCSV(SUB_TASK_FILE_ID, normalizedTaskObjects, SUB_TASK_HEADERS);
 
@@ -80,10 +80,10 @@ function resetAndImportFromSourceSheet() {
       const escalationData = escalationSheet.getDataRange().getValues();
       if (escalationData.length > 1) {
         const escalationHeaders = escalationData.shift();
-        const escalationObjects = escalationData.map(row => { 
-            let obj = {}; 
-            escalationHeaders.forEach((header, index) => { obj[header.trim()] = row[index]; }); 
-            return obj; 
+        const escalationObjects = escalationData.map(row => {
+            let obj = {};
+            escalationHeaders.forEach((header, index) => { obj[header.trim()] = row[index]; });
+            return obj;
         });
 
         // Add a normalization step for consistency, although the headers should match
@@ -115,12 +115,12 @@ function resetAndImportFromSourceSheet() {
       const pauseData = pauseSheet.getDataRange().getValues();
       if (pauseData.length > 1) {
         const pauseHeaders = pauseData.shift();
-        const pauseObjects = pauseData.map(row => { 
-            let obj = {}; 
-            pauseHeaders.forEach((header, index) => { obj[header.trim()] = row[index]; }); 
-            return obj; 
+        const pauseObjects = pauseData.map(row => {
+            let obj = {};
+            pauseHeaders.forEach((header, index) => { obj[header.trim()] = row[index]; });
+            return obj;
         });
-        
+
         // Add a normalization step for consistency
         const normalizedPauseObjects = pauseObjects.map(obj => {
           const newObj = {};
@@ -145,7 +145,7 @@ function resetAndImportFromSourceSheet() {
     }
 
     Logger.log('Data reset process completed successfully!');
-    
+
   } catch (e) {
     Logger.log(`A critical error occurred during the reset process: ${e.message}`);
   } finally {
@@ -187,7 +187,7 @@ function _exportSingleCsvToSheet(fileName, fileId, blueprintHeaders) {
         return [];
       }
     })(fileId);
-    
+
     if (!dataArray || dataArray.length <= 1) {
       Logger.log(`No data rows to write for ${fileName}.`);
       return;
@@ -195,10 +195,10 @@ function _exportSingleCsvToSheet(fileName, fileId, blueprintHeaders) {
 
     const csvHeaders = dataArray.shift();
     const headerMap = blueprintHeaders.map(h => csvHeaders.indexOf(h));
-    
+
     const batchSize = 500;
     Logger.log(`Writing ${dataArray.length} records to ${sheet.getName()} in batches...`);
-    
+
     for (let i = 0; i < dataArray.length; i += batchSize) {
       const chunk = dataArray.slice(i, i + batchSize);
       const orderedBatch = chunk.map(row => headerMap.map(index => (index === -1) ? '' : row[index]));
@@ -208,7 +208,7 @@ function _exportSingleCsvToSheet(fileName, fileId, blueprintHeaders) {
         SpreadsheetApp.flush();
       }
     }
-    
+
     sheet.autoResizeColumns(1, blueprintHeaders.length);
     Logger.log(`Successfully finished writing all records for ${fileName}.`);
 
@@ -237,7 +237,7 @@ function exportSubTasksCsvToSheet() {
  */
 function exportEscalationsCsvToSheet() {
   const blueprintHeaders = [
-    'Log ID', 'Related Case ID', 'Market', 'Task Type', 
+    'Log ID', 'Related Case ID', 'Market', 'Task Type',
     'Escalation Start Time', 'Escalation End Time', 'Escalation Reasons', 'OBQ_SLA_Status'
   ];
   _exportSingleCsvToSheet('Escalation Logs', ESCALATION_LOGS_FILE_ID, blueprintHeaders);
@@ -249,7 +249,7 @@ function exportEscalationsCsvToSheet() {
  */
 function exportPausesCsvToSheet() {
   const blueprintHeaders = [
-    'Log ID', 'Related Case ID', 'Market', 'Task type', 
+    'Log ID', 'Related Case ID', 'Market', 'Task type',
     'Pause Start Time', 'Pause End Time'
   ];
   _exportSingleCsvToSheet('Pause Logs', PAUSE_LOGS_FILE_ID, blueprintHeaders);
@@ -318,7 +318,7 @@ function _exportSingleCsvToSheet(fileName, fileId, blueprintHeaders, targetSprea
         return [];
       }
     })(fileId);
-    
+
     if (!dataArray || dataArray.length <= 1) {
       Logger.log(`No data rows to write for ${fileName}.`);
       return;
@@ -326,10 +326,10 @@ function _exportSingleCsvToSheet(fileName, fileId, blueprintHeaders, targetSprea
 
     const csvHeaders = dataArray.shift();
     const headerMap = blueprintHeaders.map(h => csvHeaders.indexOf(h));
-    
+
     const batchSize = 500;
     Logger.log(`Writing ${dataArray.length} records to ${sheet.getName()} in batches...`);
-    
+
     for (let i = 0; i < dataArray.length; i += batchSize) {
       const chunk = dataArray.slice(i, i + batchSize);
       const orderedBatch = chunk.map(row => headerMap.map(index => (index === -1) ? '' : row[index]));
@@ -339,7 +339,7 @@ function _exportSingleCsvToSheet(fileName, fileId, blueprintHeaders, targetSprea
         SpreadsheetApp.flush();
       }
     }
-    
+
     sheet.autoResizeColumns(1, blueprintHeaders.length);
     Logger.log(`Successfully finished writing all records for ${fileName}.`);
 
@@ -368,7 +368,7 @@ function exportSubTasksCsvToSheet() {
  */
 function exportEscalationsCsvToSheet() {
   const blueprintHeaders = [
-    'Log ID', 'Related Case ID', 'Market', 'Task Type', 
+    'Log ID', 'Related Case ID', 'Market', 'Task Type',
     'Escalation Start Time', 'Escalation End Time', 'Escalation Reasons', 'OBQ_SLA_Status'
   ];
   const targetSpreadsheetId = '1ztZmrSgZ6sQ8CcXC0pPqmwgbfbjW2u9GumliZbNXwsg';
@@ -380,7 +380,7 @@ function exportEscalationsCsvToSheet() {
  */
 function exportPausesCsvToSheet() {
   const blueprintHeaders = [
-    'Log ID', 'Related Case ID', 'Market', 'Task type', 
+    'Log ID', 'Related Case ID', 'Market', 'Task type',
     'Pause Start Time', 'Pause End Time'
   ];
   const targetSpreadsheetId = '1ztZmrSgZ6sQ8CcXC0pPqmwgbfbjW2u9GumliZbNXwsg';
@@ -403,17 +403,17 @@ function runAllExportsInSequence() {
       ScriptApp.deleteTrigger(trigger);
     }
   }
-  
+
   Logger.log('Starting sequential export...');
   // Set a property to mark which step we are on.
   PropertiesService.getScriptProperties().setProperty('exportStep', '1');
-  
+
   // Create a trigger to run the next part of the sequence almost immediately.
   ScriptApp.newTrigger('_continueExportSequence')
       .timeBased()
       .after(10 * 1000) // 10 seconds
       .create();
-  
+
   Logger.log('First export task has been scheduled. Check execution logs for progress.');
 }
 
@@ -442,7 +442,7 @@ function _continueExportSequence() {
       ScriptApp.newTrigger('_continueExportSequence').timeBased().after(10 * 1000).create();
       Logger.log('Step 1 complete. Scheduling Step 2 (Escalations).');
       break;
-      
+
     case '2':
       Logger.log('Executing Step 2: Exporting Escalation Logs...');
       exportEscalationsCsvToSheet();
@@ -451,7 +451,7 @@ function _continueExportSequence() {
       ScriptApp.newTrigger('_continueExportSequence').timeBased().after(10 * 1000).create();
       Logger.log('Step 2 complete. Scheduling Step 3 (Pauses).');
       break;
-      
+
     case '3':
       Logger.log('Executing Step 3: Exporting Pause Logs...');
       exportPausesCsvToSheet();
@@ -459,7 +459,7 @@ function _continueExportSequence() {
       scriptProperties.deleteProperty('exportStep');
       Logger.log('Step 3 complete. Sequential export finished.');
       break;
-      
+
     default:
       Logger.log('Unknown step or process finished. Cleaning up any remaining properties.');
       scriptProperties.deleteProperty('exportStep');
@@ -488,7 +488,7 @@ function _continueExportSequence() {
  */
 function syncAndEnrichAllData() {
   Logger.log('Starting comprehensive sync and enrichment process...');
-  
+
   const subTaskHeaders = SUB_TASK_HEADERS;
   const escalationHeaders = ['Log ID', 'Related Case ID', 'Market', 'Task Type', 'Escalation Start Time', 'Escalation End Time', 'Escalation Reasons', 'OBQ_SLA_Status'];
   const pauseHeaders = ['Log ID', 'Related Case ID', 'Market', 'Task type', 'Pause Start Time', 'Pause End Time'];
@@ -544,7 +544,7 @@ function syncAndEnrichAllData() {
         });
     });
     // --- END OF FIX ---
-    
+
     const sourceTasksMap = new Map();
     allCases.forEach(row => { if (row['Log ID']) sourceTasksMap.set(String(row['Log ID']), row); });
 
@@ -566,9 +566,9 @@ function syncAndEnrichAllData() {
     Logger.log('Processing Sub Task CSV...');
     const csvTasks = readCSV(SUB_TASK_FILE_ID);
     const csvTaskIds = new Set(csvTasks.map(row => String(row['Log ID'])));
-    
+
     const taskUpdateDetails = [];
-    
+
     csvTasks.forEach(csvRow => {
       const sourceRow = sourceTasksMap.get(String(csvRow['Log ID']));
       if (sourceRow) {
@@ -602,16 +602,16 @@ function syncAndEnrichAllData() {
         task['Stored Paused Duration'] = calculateTotalDuration_(relevantPauses, 'Pause Start Time', 'Pause End Time');
       }
     });
-    
+
     if (taskUpdateDetails.length > 0) {
       Logger.log(`Updated ${taskUpdateDetails.length} existing tasks.`);
     } else {
       Logger.log('No existing tasks needed updates.');
     }
     Logger.log(`Found ${newTasks.length} new tasks to add.`);
-    
+
     writeCSV(SUB_TASK_FILE_ID, finalTasks, subTaskHeaders);
-    
+
     const syncLogs = (fileId, sourceLogs, csvLogs, headers, logName, fieldsToSync) => {
       const sourceLogsMap = new Map(sourceLogs.map(log => [String(log['Log ID']), log]));
       const csvLogIds = new Set(csvLogs.map(row => String(row['Log ID'])));
@@ -634,22 +634,22 @@ function syncAndEnrichAllData() {
       });
 
       const newLogs = sourceLogs.filter(log => log['Log ID'] && !csvLogIds.has(String(log['Log ID'])));
-      
+
       if(newLogs.length > 0 || updateDetails.length > 0) {
         const combinedLogs = csvLogs.concat(newLogs);
         writeCSV(fileId, combinedLogs, headers);
       }
-      
+
       if (updateDetails.length > 0) Logger.log(`Updated ${updateDetails.length} existing ${logName} records.`);
       if (newLogs.length > 0) Logger.log(`Found ${newLogs.length} new ${logName} records to add.`);
       if (newLogs.length === 0 && updateDetails.length === 0) Logger.log(`No new or updated ${logName} records found.`);
 
       return { updatedCount: updateDetails.length, newCount: newLogs.length };
     };
-    
+
     const csvEscalations = readCSV(ESCALATION_LOGS_FILE_ID);
     const csvPauses = readCSV(PAUSE_LOGS_FILE_ID);
-    
+
     const escalationSyncResult = syncLogs(ESCALATION_LOGS_FILE_ID, allEscalations, csvEscalations, escalationHeaders, 'Escalation', ['Escalation Start Time', 'Escalation End Time', 'Escalation Reasons']);
     const pauseSyncResult = syncLogs(PAUSE_LOGS_FILE_ID, allPauses, csvPauses, pauseHeaders, 'Pause', ['Pause Start Time', 'Pause End Time']);
 
@@ -660,7 +660,7 @@ function syncAndEnrichAllData() {
     if (escalationSyncResult.newCount > 0) logDetailsParts.push(`Added ${escalationSyncResult.newCount} new escalations`);
     if (pauseSyncResult.updatedCount > 0) logDetailsParts.push(`Updated ${pauseSyncResult.updatedCount} pauses`);
     if (pauseSyncResult.newCount > 0) logDetailsParts.push(`Added ${pauseSyncResult.newCount} new pauses`);
-    
+
     const logSummary = logDetailsParts.length > 0 ? logDetailsParts.join(', ') + '.' : 'No changes detected.';
 
     createAuditLog({ user: 'System Sync', action: 'Data Sync', details: logSummary });
@@ -720,7 +720,7 @@ function runFullDataReconciliationAudit() {
     const activeTasks = fetchFromGoogleSheet_(SOURCE_SUB_TASK_SHEET_ID);
     const activeEscalations = fetchFromGoogleSheet_(SOURCE_ESCALATION_SHEET_ID);
     const activePauses = fetchFromGoogleSheet_(SOURCE_PAUSE_SHEET_ID);
-    
+
     const completedTasks = fetchFromAppSheetAPI_('Completed_Cases');
     const completedEscalations = fetchFromAppSheetAPI_('Completed_Escalation_Logs');
     const completedPauses = fetchFromAppSheetAPI_('Completed_Pause_Logs');
@@ -732,16 +732,16 @@ function runFullDataReconciliationAudit() {
     // --- Step 2: Reconciliation Logic ---
     const reconcile = (name, active, completed, csv, allCompletedTasks) => {
       Logger.log(`\n--- Reconciling: ${name} ---`);
-      
+
       const activeIds = new Set(active.map(i => String(i['Log ID'])));
       const completedIds = new Set(completed.map(i => String(i['Log ID'])));
       const csvIds = new Set(csv.map(i => String(i['Log ID'])));
       const sourceIds = new Set([...activeIds, ...completedIds]);
-      
+
       // --- UPGRADED DUPLICATE LOGIC ---
       const completedCaseIds = new Set(allCompletedTasks.map(t => String(t['Case ID'])));
       const overlappingIds = [...activeIds].filter(id => completedIds.has(id));
-      
+
       const allSourceRecordsMap = new Map();
       active.forEach(rec => allSourceRecordsMap.set(String(rec['Log ID']), rec));
       completed.forEach(rec => allSourceRecordsMap.set(String(rec['Log ID']), rec));
@@ -755,7 +755,7 @@ function runFullDataReconciliationAudit() {
       });
 
       Logger.log(`Counts: Active=${active.length}, Completed=${completed.length}, Total Unique Source Records=${sourceIds.size}, CSV=${csv.length}`);
-      
+
       if (trueDuplicates.length > 0) {
         Logger.log(`WARNING: Found ${trueDuplicates.length} TRUE DUPLICATE record(s) between Active and Completed sources (belonging to non-completed cases).`);
 
@@ -768,7 +768,7 @@ function runFullDataReconciliationAudit() {
                 const record = allSourceRecordsMap.get(id);
                 if (record) {
                     const taskType = record['Task type'] || 'Unknown';
-                    if (taskType === 'Adhoc-Process') { adhocProcessCount++; } 
+                    if (taskType === 'Adhoc-Process') { adhocProcessCount++; }
                     else if (taskType === 'Adhoc-Admin') { adhocAdminCount++; }
                     else {
                         const caseId = record['Case ID'] || 'Unknown';
@@ -777,11 +777,11 @@ function runFullDataReconciliationAudit() {
                     }
                 }
             });
-            
+
             const totalNormal = trueDuplicates.length - adhocProcessCount - adhocAdminCount;
             Logger.log(` -> Adhoc-Process Duplicates Found: ${adhocProcessCount}`);
             Logger.log(` -> Adhoc-Admin Duplicates Found: ${adhocAdminCount}`);
-            
+
             if (totalNormal > 0) {
                 Logger.log(` -> Normal Task Duplicates Found: ${totalNormal}`);
                 Logger.log(`    (Showing first ${normalDuplicates.length} examples)`);
@@ -798,7 +798,7 @@ function runFullDataReconciliationAudit() {
       } else {
         Logger.log("OK: No true duplicates found between Active and Completed sources.");
       }
-      
+
       // --- NEW: INTERNAL CSV DUPLICATE CHECK ---
       const internalCsvDuplicates = findInternalDuplicates(csv, 'Log ID');
       if (internalCsvDuplicates.length > 0) {
@@ -829,7 +829,7 @@ function runFullDataReconciliationAudit() {
       } else {
         Logger.log("OK: All source records are present in the CSV file.");
       }
-      
+
       const orphanedInCsv = [...csvIds].filter(id => !sourceIds.has(id));
       if (orphanedInCsv.length > 0) {
         Logger.log(`ERROR: Found ${orphanedInCsv.length} ORPHANED record(s) in the CSV file (deleted from source): ${orphanedInCsv.join(', ')}`);
@@ -837,7 +837,7 @@ function runFullDataReconciliationAudit() {
         Logger.log("OK: No orphaned records found in the CSV file.");
       }
     };
-    
+
     reconcile("Tasks", activeTasks, completedTasks, csvTasks, completedTasks);
     reconcile("Escalations", activeEscalations, completedEscalations, csvEscalations, completedTasks);
     reconcile("Pauses", activePauses, completedPauses, csvPauses, completedTasks);
@@ -943,7 +943,7 @@ function removeOrphanedRecordsFromCSVs() {
     const validTaskIds = new Set([...activeTasks.map(t => String(t['Log ID'])), ...completedTasks.map(t => String(t['Log ID']))]);
     const validEscalationIds = new Set([...activeEscalations.map(e => String(e['Log ID'])), ...completedEscalations.map(e => String(e['Log ID']))]);
     const validPauseIds = new Set([...activePauses.map(p => String(p['Log ID'])), ...completedPauses.map(p => String(p['Log ID']))]);
-    
+
     Logger.log(`Found ${validTaskIds.size} unique source Task IDs.`);
     Logger.log(`Found ${validEscalationIds.size} unique source Escalation Log IDs.`);
     Logger.log(`Found ${validPauseIds.size} unique source Pause Log IDs.`);
@@ -956,7 +956,7 @@ function removeOrphanedRecordsFromCSVs() {
         Logger.log(" -> File is empty. No action needed.");
         return;
       }
-      
+
       const cleanedData = data.filter(row => validIdSet.has(String(row[primaryKey])));
       const orphansRemoved = data.length - cleanedData.length;
 
@@ -968,7 +968,7 @@ function removeOrphanedRecordsFromCSVs() {
         Logger.log(" -> No orphaned records found in this file.");
       }
     };
-    
+
     // Define master headers for all files to ensure safe writes
     const escalationHeaders = ['Log ID', 'Related Case ID', 'Market', 'Task Type', 'Escalation Start Time', 'Escalation End Time', 'Escalation Reasons', 'OBQ_SLA_Status'];
     const pauseHeaders = ['Log ID', 'Related Case ID', 'Market', 'Task type', 'Pause Start Time', 'Pause End Time'];
@@ -978,7 +978,7 @@ function removeOrphanedRecordsFromCSVs() {
     processFile('Pause Logs', PAUSE_LOGS_FILE_ID, pauseHeaders, validPauseIds, 'Log ID');
 
     Logger.log("\n--- Orphaned Record Removal Process Complete ---");
-  
+
   } catch (e) {
     Logger.log(`A critical error occurred during the orphan removal process: ${e.message}`);
   } finally {
@@ -1008,11 +1008,18 @@ function startInternalReportExport() {
     const reportUrl = newSpreadsheet.getUrl();
     Logger.log(`Report spreadsheet created. URL: ${reportUrl}`);
 
-    // ✨ FIX PART 2: Immediately add the user as an editor.
-    newSpreadsheet.addEditor(userEmail);
+    // ✨ FIX PART 2: Immediately add the user as an editor without sending an email.
+    const newFileId = newSpreadsheet.getId();
+    Drive.Permissions.insert({
+      'role': 'writer',
+      'type': 'user',
+      'value': userEmail
+    }, newFileId, {
+      'sendNotificationEmails': false
+    });
 
     // Step 2: Store the ID of the new sheet so the background process can find it.
-    PropertiesService.getScriptProperties().setProperty('tempExportSheetId', newSpreadsheet.getId());
+    PropertiesService.getScriptProperties().setProperty('tempExportSheetId', newFileId);
 
     // Step 3: Create a one-time trigger to run the data-filling function in a few seconds.
     ScriptApp.newTrigger('_fillInternalReportSheet')
@@ -1058,7 +1065,7 @@ function _fillInternalReportSheet() {
       { sheetName: "Escalation Logs", fileId: ESCALATION_LOGS_FILE_ID, headers: ['Log ID', 'Related Case ID', 'Market', 'Task Type', 'Escalation Start Time', 'Escalation End Time', 'Escalation Reasons', 'OBQ_SLA_Status'] },
       { sheetName: "Pause Logs", fileId: PAUSE_LOGS_FILE_ID, headers: ['Log ID', 'Related Case ID', 'Market', 'Task type', 'Pause Start Time', 'Pause End Time'] }
     ];
-    
+
     exportJobs.forEach(job => {
       const sheet = newSpreadsheet.insertSheet(job.sheetName);
       sheet.getRange(1, 1, 1, job.headers.length).setValues([job.headers]).setFontWeight('bold');
