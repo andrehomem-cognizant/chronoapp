@@ -1,0 +1,1064 @@
+// =================================================================================== //
+// ==========              GLOBAL CONFIGURATION                  ====================== //
+// =================================================================================== //
+const SHEET_NAME_SUB_TASK = "Sub Task Sheet";
+const SHEET_NAME_ESCALATION_LOGS = "Escalation Logs";
+const SHEET_NAME_PAUSE_LOGS = "Pause Logs";
+const SCRIPT_APP_VERSION = "13.9"; // Corrected AHT Calculation Logic
+
+// =================================================================================== //
+// ==========        COLUMN INDICES FOR "Sub Task Sheet"         ====================== //
+// =================================================================================== //
+const COL_SUBTASK_CASE_ID = 2;
+const COL_SUBTASK_MARKET = 3;
+const COL_SUBTASK_USER = 4;
+const COL_SUBTASK_TASK_TYPE = 5;
+const COL_SUBTASK_START_TIMESTAMP = 6;
+const COL_SUBTASK_END_TIMESTAMP = 7;
+const COL_SUBTASK_OBQ_REASONS = 8;
+const COL_SUBTASK_CASE_CREATED = 9;
+const COL_SUBTASK_STATUS = 10;
+const COL_SUBTASK_COMMENTS = 11;
+const COL_SUBTASK_ASSET_DELIVERY_DATE = 15;
+const COL_SUBTASK_ASSET_TRIGGER_DATE = 16;
+const COL_SUBTASK_POST_OBQ_TAGS = 20;
+
+// =================================================================================== //
+// ==========      COLUMN INDICES FOR "Escalation" & "Pause" Logs  =============== //
+// =================================================================================== //
+const COL_LOGS_RELATED_CASE_ID = 1;
+const COL_LOGS_TASK_TYPE = 3; 
+const COL_LOGS_START_TIME = 4;
+const COL_LOGS_END_TIME = 5;
+const COL_ESC_REASONS = 6; 
+
+// =================================================================================== //
+// ==========            SLA CONFIGURATION (in Hours)            ====================== //
+// =================================================================================== //
+const SLA_HOURS = {
+  "Onboarding Qualify": 24, "Admin Creation": 0.10, "Menu Creation": 24,
+  "Asset Delivery": 72, "Integration": 144, "default": 24
+};
+
+// =================================================================================== //
+// ==========            WEB APP & DATA ENDPOINTS                ====================== //
+// =================================================================================== //
+
+function doGet(e) {
+  const html = HtmlService.createTemplateFromFile('Index').evaluate();
+  html.setTitle(`O&Q Dashboard v${SCRIPT_APP_VERSION}`);
+  html.setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT);
+  return html;
+}
+
+function include(filename) {
+  return HtmlService.createHtmlOutputFromFile(filename).getContent();
+}
+
+function exportDataToSheet(headers, rows) {
+    try {
+        const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH'h'mm'm'");
+        const sheetName = `Dashboard Export ${timestamp}`;
+        const newSpreadsheet = SpreadsheetApp.create(sheetName);
+        const sheet = newSpreadsheet.getSheets()[0];
+        
+        sheet.appendRow(headers);
+        if (rows && rows.length > 0) {
+            sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
+        }
+        
+        sheet.getRange(1, 1, 1, headers.length).setFontWeight("bold");
+        sheet.autoResizeColumns(1, headers.length);
+        
+        Logger.log(`Successfully created sheet: ${newSpreadsheet.getUrl()}`);
+        return newSpreadsheet.getUrl();
+    } catch (e) {
+        Logger.log(`CRITICAL Error in exportDataToSheet: ${e.toString()}`);
+        return null;
+    }
+}
+
+
+function getCaseDetails(caseId) {
+    try {
+        if (!caseId) throw new Error("No Case ID provided.");
+        const ss = SpreadsheetApp.getActiveSpreadsheet();
+        const caseIdTrimmed = caseId.toString().trim();
+        const findAndMapData = (sheetName, idColumnIndex, mappingFunction) => {
+            const sheet = ss.getSheetByName(sheetName);
+            if (!sheet || sheet.getLastRow() < 2) return [];
+            const textFinder = sheet.createTextFinder(caseIdTrimmed).matchEntireCell(true);
+            const foundRanges = textFinder.findAll();
+            return foundRanges
+                .filter(range => range.getColumn() === idColumnIndex + 1)
+                .map(range => {
+                    const row = sheet.getRange(range.getRow(), 1, 1, sheet.getLastColumn()).getValues()[0];
+                    return mappingFunction(row);
+                });
+        };
+        const taskMapper = row => ({
+            taskType: row[COL_SUBTASK_TASK_TYPE], status: row[COL_SUBTASK_STATUS],
+            start: row[COL_SUBTASK_START_TIMESTAMP] ? new Date(row[COL_SUBTASK_START_TIMESTAMP]).toISOString() : null,
+            end: row[COL_SUBTASK_END_TIMESTAMP] ? new Date(row[COL_SUBTASK_END_TIMESTAMP]).toISOString() : null,
+            obqReasons: row[COL_SUBTASK_OBQ_REASONS], comments: row[COL_SUBTASK_COMMENTS]
+        });
+        const escalationMapper = row => ({
+            taskType: row[COL_LOGS_TASK_TYPE],
+            start: row[COL_LOGS_START_TIME] ? new Date(row[COL_LOGS_START_TIME]).toISOString() : null,
+            end: row[COL_LOGS_END_TIME] ? new Date(row[COL_LOGS_END_TIME]).toISOString() : null,
+            reason: row[COL_ESC_REASONS]
+        });
+        const pauseMapper = row => ({
+            start: row[COL_LOGS_START_TIME] ? new Date(row[COL_LOGS_START_TIME]).toISOString() : null,
+            end: row[COL_LOGS_END_TIME] ? new Date(row[COL_LOGS_END_TIME]).toISOString() : null
+        });
+        const tasks = findAndMapData(SHEET_NAME_SUB_TASK, COL_SUBTASK_CASE_ID, taskMapper);
+        const escalations = findAndMapData(SHEET_NAME_ESCALATION_LOGS, COL_LOGS_RELATED_CASE_ID, escalationMapper);
+        const pauses = findAndMapData(SHEET_NAME_PAUSE_LOGS, COL_LOGS_RELATED_CASE_ID, pauseMapper);
+        return { tasks, escalations, pauses, error: null };
+    } catch (error) {
+        Logger.log(`CRITICAL Error in getCaseDetails: ${error.toString()}`);
+        return { error: `Error fetching details for Case ID ${caseId}: ${error.message}` };
+    }
+}
+
+
+function getDashboardData(filters = {}) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheetSubTask = ss.getSheetByName(SHEET_NAME_SUB_TASK);
+    const sheetEscalation = ss.getSheetByName(SHEET_NAME_ESCALATION_LOGS);
+    const sheetPause = ss.getSheetByName(SHEET_NAME_PAUSE_LOGS);
+
+    if (!sheetSubTask) throw new Error(`Sheet "${SHEET_NAME_SUB_TASK}" not found.`);
+
+    const allSubTaskValues = sheetSubTask.getDataRange().getValues();
+    allSubTaskValues.shift();
+    let escalationData = sheetEscalation ? sheetEscalation.getDataRange().getValues() : [[]];
+    escalationData.shift();
+    let pauseData = sheetPause ? sheetPause.getDataRange().getValues() : [[]];
+    pauseData.shift();
+    
+    // ✅ 1. CALL THE NEW, ISOLATED FUNCTION TO GET OBQ AHT
+    const obqAhtResults = getObqAhtKpi(filters, allSubTaskValues, pauseData, escalationData);
+    
+    const allCases = new Map();
+    const handledTasksMap = new Map(); 
+
+    allSubTaskValues.forEach(row => {
+        const caseId = (row[COL_SUBTASK_CASE_ID] || "").toString().trim();
+        if (!caseId) return;
+        if (!allCases.has(caseId)) {
+            allCases.set(caseId, { tasks: [], market: row[COL_SUBTASK_MARKET], agent: row[COL_SUBTASK_USER] });
+        }
+        allCases.get(caseId).tasks.push(row);
+    });
+
+    let kpis = {};
+    const inProgressCaseIds = new Set();
+    const handledCaseIds = new Set();
+    
+    const filterStartDate = filters.startDate ? assistantParseDateDashed(filters.startDate) : null;
+    const filterEndDate = filters.endDate ? assistantParseDateDashed(filters.endDate) : null;
+    if (filterStartDate) filterStartDate.setHours(0, 0, 0, 0);
+    if (filterEndDate) filterEndDate.setHours(23, 59, 59, 999);
+
+    allCases.forEach((caseData, caseId) => {
+        if (filters.market && caseData.market !== filters.market) return;
+        let caseAddedToInProgress = false;
+        let caseAddedToHandled = false;
+        for (const task of caseData.tasks) {
+            if (filters.taskType && (task[COL_SUBTASK_TASK_TYPE] || "").toString().trim() !== filters.taskType) {
+                continue;
+            }
+            const taskStart = assistantParseDateString(task[COL_SUBTASK_START_TIMESTAMP]);
+            const taskEnd = assistantParseDateString(task[COL_SUBTASK_END_TIMESTAMP]);
+            
+            if (!caseAddedToHandled) {
+                let isConsideredHandled = false;
+                if (filterStartDate) {
+                    if (taskStart && taskStart >= filterStartDate && taskStart <= filterEndDate) {
+                        isConsideredHandled = true;
+                    }
+                } else {
+                    if (taskStart) {
+                        isConsideredHandled = true;
+                    }
+                }
+                if (isConsideredHandled) {
+                    handledCaseIds.add(caseId);
+                    handledTasksMap.set(caseId, task);
+                    caseAddedToHandled = true;
+                }
+            }
+            
+            if (!caseAddedToInProgress) {
+                 let isConsideredInProgress = false;
+                if (filterStartDate && filterEndDate) {
+                    const startedInRange = taskStart && taskStart >= filterStartDate && taskStart <= filterEndDate;
+                    const endedAfterRange = !taskEnd || taskEnd > filterEndDate;
+                    if (startedInRange && endedAfterRange) {
+                        isConsideredInProgress = true;
+                    }
+                } else if (!filterStartDate && !filterEndDate) {
+                    if (!taskEnd) {
+                        isConsideredInProgress = true;
+                    }
+                }
+                if (isConsideredInProgress) {
+                    inProgressCaseIds.add(caseId);
+                    caseAddedToInProgress = true;
+                }
+            }
+            if (caseAddedToHandled && caseAddedToInProgress) break;
+        }
+    });
+    kpis.inProgressTotalCases = inProgressCaseIds.size;
+    kpis.totalHandledCases = handledCaseIds.size;
+
+    let relevantEscalationData = escalationData;
+    if(filters.taskType) {
+        relevantEscalationData = escalationData.filter(row => (row[COL_LOGS_TASK_TYPE] || "").toString().trim() === filters.taskType);
+    }
+    const allEscalatedCaseIds = new Set(relevantEscalationData.map(row => (row[COL_LOGS_RELATED_CASE_ID] || "").toString().trim()));
+    const escalatedCasesInFilter = new Set([...handledCaseIds].filter(caseId => allEscalatedCaseIds.has(caseId)));
+    
+    kpis.casesWithEscalations = escalatedCasesInFilter.size;
+    kpis.casesWithoutEscalations = handledCaseIds.size - escalatedCasesInFilter.size;
+
+    const avgEscalationDurationMap = new Map();
+    const caseIdsForAvgEscTime = new Set(); 
+    relevantEscalationData.forEach(eRow => {
+        const caseId = (eRow[COL_LOGS_RELATED_CASE_ID] || "").toString().trim();
+        if (handledCaseIds.has(caseId)) {
+            const start = assistantParseDateString(eRow[COL_LOGS_START_TIME]);
+            const end = assistantParseDateString(eRow[COL_LOGS_END_TIME]);
+            if (!start || !end) return; 
+            if (filterEndDate && end > filterEndDate) return;
+            
+            const duration = end.getTime() - start.getTime();
+            if (duration >= 0) {
+                avgEscalationDurationMap.set(caseId, (avgEscalationDurationMap.get(caseId) || 0) + duration);
+                caseIdsForAvgEscTime.add(caseId);
+            }
+        }
+    });
+    let totalAvgEscalationMillis = 0;
+    avgEscalationDurationMap.forEach(duration => totalAvgEscalationMillis += duration);
+    kpis.avgEscalatedTimeMins = caseIdsForAvgEscTime.size > 0 ? (totalAvgEscalationMillis / caseIdsForAvgEscTime.size / 60000).toFixed(2) : "0.00";
+    kpis.avgEscalationFullTimeHours = caseIdsForAvgEscTime.size > 0 ? (totalAvgEscalationMillis / caseIdsForAvgEscTime.size / 3600000).toFixed(2) : "0.00";
+
+    const { filteredCases, matchingTasksMap } = filterCases_(allCases, filters);
+    const cases = filteredCases;
+
+    const ahtEscalationOverlapMap = new Map();
+    escalationData.forEach(eRow => {
+        const caseId = (eRow[COL_LOGS_RELATED_CASE_ID] || "").toString().trim();
+        if (!matchingTasksMap.has(caseId)) return;
+        const taskType = (eRow[COL_LOGS_TASK_TYPE] || "").toString().trim();
+        const key = `${caseId}-${taskType}`;
+        const task = (matchingTasksMap.get(caseId) || []).find(t => (t[COL_SUBTASK_TASK_TYPE] || "").toString().trim() === taskType);
+        if (task) {
+            const taskStart = assistantParseDateString(task[COL_SUBTASK_START_TIMESTAMP]);
+            const taskEnd = assistantParseDateString(task[COL_SUBTASK_END_TIMESTAMP]);
+            const escStart = assistantParseDateString(eRow[COL_LOGS_START_TIME]);
+            const escEnd = assistantParseDateString(eRow[COL_LOGS_END_TIME]);
+            if (taskStart && taskEnd && escStart && escEnd) {
+                const overlapStart = Math.max(taskStart.getTime(), escStart.getTime());
+                const overlapEnd = Math.min(taskEnd.getTime(), escEnd.getTime());
+                const duration = overlapEnd - overlapStart;
+                if (duration > 0) {
+                    ahtEscalationOverlapMap.set(key, (ahtEscalationOverlapMap.get(key) || 0) + duration);
+                }
+            }
+        }
+    });
+
+    cases.forEach((caseData, caseId) => {
+        let tasksToCheckForCompletion;
+        if (filters.taskType) {
+            tasksToCheckForCompletion = matchingTasksMap.get(caseId) || [];
+        } else {
+            tasksToCheckForCompletion = caseData.tasks;
+        }
+        const isCompleted = tasksToCheckForCompletion.length > 0 && tasksToCheckForCompletion.every(
+            task => (task[COL_SUBTASK_STATUS] || "").toString().trim().toLowerCase() === 'completed'
+        );
+        caseData.status = isCompleted ? "Completed" : "In Progress";
+    });
+    
+    const subTaskData = Array.from(cases.values()).flatMap(c => c.tasks); 
+    const filteredCaseIds = new Set(cases.keys());
+    const pauseMap = new Map();
+    pauseData.forEach(pRow => {
+        const caseId = (pRow[COL_LOGS_RELATED_CASE_ID] || "").toString().trim();
+        if (filteredCaseIds.has(caseId)) {
+            const start = assistantParseDateString(pRow[COL_LOGS_START_TIME]);
+            const end = assistantParseDateString(pRow[COL_LOGS_END_TIME]);
+            if (caseId && start && end && end > start) {
+                pauseMap.set(caseId, (pauseMap.get(caseId) || 0) + (end.getTime() - start.getTime()));
+            }
+        }
+    });
+    
+    cases.forEach((caseData, caseId) => {
+        caseData.isEscalated = escalatedCasesInFilter.has(caseId);
+        let earliestStart = null, latestEnd = null;
+        caseData.tasks.forEach(task => {
+            const start = assistantParseDateString(task[COL_SUBTASK_START_TIMESTAMP]);
+            const end = assistantParseDateString(task[COL_SUBTASK_END_TIMESTAMP]);
+            if (start && (!earliestStart || start < earliestStart)) earliestStart = start;
+            if (end && (!latestEnd || end > latestEnd)) latestEnd = end;
+        });
+        caseData.earliestStartDate = earliestStart;
+        caseData.latestEndDate = latestEnd;
+    });
+
+    const kpiFilter = filters.kpiFilter;
+    let tempCaseIds = new Set();
+    
+    let sums = {
+      onboardingDoneAHTMillis: 0, integrationTATMillis: 0, assetDeliveryTATMillis: 0,
+      assetTriggeredAHTMillis: 0,
+      postObqAHTMillis: 0, postObqAHTWithEscMillis: 0, postObqAHTWithoutEscMillis: 0,
+      assetDeliveryAHTMillis: 0, assetDeliveryAHTWithEscMillis: 0, assetDeliveryAHTWithoutEscMillis: 0,
+      integrationAHTMillis: 0, integrationAHTWithEscMillis: 0, integrationAHTWithoutEscMillis: 0,
+      menuCreationAHTMillis: 0, menuCreationAHTWithEscMillis: 0, menuCreationAHTWithoutEscMillis: 0,
+      adminCreationAHTMillis: 0, adminCreationAHTWithEscMillis: 0, adminCreationAHTWithoutEscMillis: 0
+    };
+    let counts = {
+      onboardingDoneAHT: 0, integrationTAT: 0, assetDeliveryTAT: 0,
+      assetTriggeredAHT: 0, casesMetSLA: 0, integrationPending: 0,
+      postObqAHT: 0, postObqAHTWithEsc: 0, postObqAHTWithoutEsc: 0,
+      assetDeliveryAHT: 0, assetDeliveryAHTWithEsc: 0, assetDeliveryAHTWithoutEsc: 0,
+      integrationAHT: 0, integrationAHTWithEsc: 0, integrationAHTWithoutEsc: 0,
+      menuCreationAHT: 0, menuCreationAHTWithEsc: 0, menuCreationAHTWithoutEsc: 0,
+      adminCreationAHT: 0, adminCreationAHTWithEsc: 0, adminCreationAHTWithoutEsc: 0
+    };
+
+    const integrationCaseIds = new Set();
+    const taskTypeChartAggregates = {};
+    const adhocCounts = {};
+    
+    const completedCasesInFilter = new Set();
+    cases.forEach((caseData, caseId) => {
+        if ((caseData.status || "").toLowerCase() === "completed") {
+            completedCasesInFilter.add(caseId);
+        }
+    });
+    kpis.totalCases = completedCasesInFilter.size;
+
+    cases.forEach((caseData, caseId) => {
+      let hasIntegration = false, caseSlaMet = true;
+      let isIntegrationPending = false;
+      const tasksToProcess = matchingTasksMap.get(caseId) || []; 
+
+      tasksToProcess.forEach(task => {
+        const taskType = (task[COL_SUBTASK_TASK_TYPE] || "").toString().trim();
+        if (taskType === "Integration") { hasIntegration = true; if (!task[COL_SUBTASK_END_TIMESTAMP]) isIntegrationPending = true; }
+        const start = assistantParseDateString(task[COL_SUBTASK_START_TIMESTAMP]);
+        const end = assistantParseDateString(task[COL_SUBTASK_END_TIMESTAMP]);
+        if (start && end && end > start) {
+          const durationHours = (end.getTime() - start.getTime()) / 3600000;
+          const slaLimit = SLA_HOURS[taskType] || SLA_HOURS.default;
+          if (durationHours > slaLimit) caseSlaMet = false;
+        }
+      });
+      if (completedCasesInFilter.has(caseId) && caseSlaMet) {
+          counts.casesMetSLA++;
+      }
+      if (isIntegrationPending) counts.integrationPending++;
+      if (hasIntegration) integrationCaseIds.add(caseId);
+      const finalTask = tasksToProcess.find(t => ["Integration", "Asset Delivery", "Menu Creation"].includes((t[COL_SUBTASK_TASK_TYPE] || "").toString().trim()));
+      if (finalTask) {
+        const start = assistantParseDateString(finalTask[COL_SUBTASK_START_TIMESTAMP]);
+        const end = assistantParseDateString(finalTask[COL_SUBTASK_END_TIMESTAMP]);
+        if (start && end && end > start) {
+          const aht = (end.getTime() - start.getTime()) - (pauseMap.get(caseId) || 0);
+          if (aht > 0) { sums.onboardingDoneAHTMillis += aht; counts.onboardingDoneAHT++; }
+        }
+      }
+      tasksToProcess.forEach(task => {
+        const taskType = (task[COL_SUBTASK_TASK_TYPE] || "").toString().trim();
+        if (!taskType) return;
+        if (!taskTypeChartAggregates[taskType]) taskTypeChartAggregates[taskType] = { tatMillis: 0, tatCount: 0, ahtMillis: 0, ahtCount: 0, escCount: 0, nonEscCount: 0 };
+        const agg = taskTypeChartAggregates[taskType];
+        const start = assistantParseDateString(task[COL_SUBTASK_START_TIMESTAMP]);
+        const end = assistantParseDateString(task[COL_SUBTASK_END_TIMESTAMP]);
+        if (start && end && end > start) {
+          const rawDuration = end.getTime() - start.getTime();
+          const pauseDuration = pauseMap.get(caseId) || 0;
+          const escalationDuration = ahtEscalationOverlapMap.get(`${caseId}-${taskType}`) || 0;
+          const aht = rawDuration - pauseDuration;
+          const specificAht = rawDuration - pauseDuration - escalationDuration;
+          agg.tatMillis += rawDuration; agg.tatCount++;
+          if (aht > 0) { agg.ahtMillis += aht; agg.ahtCount++; }
+          if (caseData.isEscalated) agg.escCount++; else agg.nonEscCount++;
+
+          const isEscalated = allEscalatedCaseIds.has(caseId);
+
+          if (specificAht > 0) {
+              const typeConfig = {
+                  // ✅ 2. "Onboarding Qualify" IS REMOVED FROM THIS LIST
+                  "Post OBQ": { base: 'postObq', kpiFilter: 'avgPostObqAHTMins', withEscFilter: 'postObqAHTMinsWithEscalations', withoutEscFilter: 'postObqAHTMinsWithoutEscalations' },
+                  "Asset Delivery": { base: 'assetDelivery', kpiFilter: 'avgAssetDeliveryAHTMins', withEscFilter: 'assetDeliveryAHTMinsWithEscalations', withoutEscFilter: 'assetDeliveryAHTMinsWithoutEscalations' },
+                  "Integration": { base: 'integration', kpiFilter: 'avgIntegrationAHTMins', withEscFilter: 'integrationAHTMinsWithEscalations', withoutEscFilter: 'integrationAHTMinsWithoutEscalations' },
+                  "Menu Creation": { base: 'menuCreation', kpiFilter: 'avgMenuCreationAHTMins', withEscFilter: 'menuCreationAHTMinsWithEscalations', withoutEscFilter: 'menuCreationAHTMinsWithoutEscalations' },
+                  "Admin Creation": { base: 'adminCreation', kpiFilter: 'avgAdminCreationAHTMins', withEscFilter: 'adminCreationAHTMinsWithEscalations', withoutEscFilter: 'adminCreationAHTMinsWithoutEscalations' }
+              };
+              
+              const config = typeConfig[taskType];
+              if (config) {
+                  sums[`${config.base}AHTMillis`] += specificAht;
+                  counts[`${config.base}AHT`]++;
+                  if (kpiFilter === config.kpiFilter) tempCaseIds.add(caseId);
+                  
+                  if (isEscalated) {
+                      sums[`${config.base}AHTWithEscMillis`] += specificAht;
+                      counts[`${config.base}AHTWithEsc`]++;
+                      if (kpiFilter === config.withEscFilter) tempCaseIds.add(caseId);
+                  } else {
+                      sums[`${config.base}AHTWithoutEscMillis`] += specificAht;
+                      counts[`${config.base}AHTWithoutEsc`]++;
+                      if (kpiFilter === config.withoutEscFilter) tempCaseIds.add(caseId);
+                  }
+              }
+          }
+          
+          if (taskType === "Integration") { sums.integrationTATMillis += rawDuration; counts.integrationTAT++; if(kpiFilter === 'avgIntegrationTAT') tempCaseIds.add(caseId); }
+          if (taskType === "Asset Delivery") {
+            const assetDeliveryDate = assistantParseDateString(task[COL_SUBTASK_ASSET_DELIVERY_DATE]);
+            if (assetDeliveryDate && assetDeliveryDate > start) { sums.assetDeliveryTATMillis += (assetDeliveryDate.getTime() - start.getTime()); counts.assetDeliveryTAT++; if(kpiFilter === 'avgAssetDeliveryTAT') tempCaseIds.add(caseId); }
+            const assetTriggerDate = assistantParseDateString(task[COL_SUBTASK_ASSET_TRIGGER_DATE]);
+            if(assetTriggerDate && assetTriggerDate > start) { sums.assetTriggeredAHTMillis += (assetTriggerDate.getTime() - start.getTime()); counts.assetTriggeredAHT++; if(kpiFilter === 'avgAssetTriggeredAHTMins') tempCaseIds.add(caseId); }
+          }
+        }
+      });
+    });
+
+    const adhocTaskTypes = ["Post OBQ", "Adhoc-Process", "Adhoc-Admin"];
+    subTaskData.forEach(row => {
+        const taskType = (row[COL_SUBTASK_TASK_TYPE] || "").toString().trim();
+        if (adhocTaskTypes.includes(taskType)) {
+            const tag = (row[COL_SUBTASK_POST_OBQ_TAGS] || "Untagged").toString().trim();
+            if (tag) adhocCounts[tag] = (adhocCounts[tag] || 0) + 1;
+        }
+    });
+
+    kpis.integrationPendingCases = counts.integrationPending;
+    kpis.avgAssetTriggeredAHTMins = counts.assetTriggeredAHT > 0 ? (sums.assetTriggeredAHTMillis / counts.assetTriggeredAHT / 60000).toFixed(2) : "0.00";
+    kpis.avgOnboardingDoneTAT = completedCasesInFilter.size > 0 ? ((counts.casesMetSLA / completedCasesInFilter.size) * 100).toFixed(1) + "%" : "N/A";
+    kpis.onboardingDoneAHTDays = counts.onboardingDoneAHT > 0 ? (sums.onboardingDoneAHTMillis / counts.onboardingDoneAHT / 86400000).toFixed(2) : "0.00";
+    kpis.avgIntegrationTAT = counts.integrationTAT > 0 ? (sums.integrationTATMillis / counts.integrationTAT / 86400000).toFixed(2) : "0.00";
+    kpis.avgAssetDeliveryTAT = counts.assetDeliveryTAT > 0 ? (sums.assetDeliveryTATMillis / counts.assetDeliveryTAT / 86400000).toFixed(2) : "0.00";
+    kpis.totalCasesWithIntegration = integrationCaseIds.size;
+    
+    // The old loop no longer calculates "obq", so we remove it from the list
+    const ahtKpiTypes = ["postObq", "assetDelivery", "integration", "menuCreation", "adminCreation"];
+    ahtKpiTypes.forEach(type => {
+        const capitalizedType = type.charAt(0).toUpperCase() + type.slice(1);
+        kpis[`avg${capitalizedType}AHTMins`] = counts[`${type}AHT`] > 0 ? (sums[`${type}AHTMillis`] / counts[`${type}AHT`] / 60000).toFixed(2) : "0.00";
+        kpis[`${type}AHTMinsWithEscalations`] = counts[`${type}AHTWithEsc`] > 0 ? (sums[`${type}AHTWithEscMillis`] / counts[`${type}AHTWithEsc`] / 60000).toFixed(2) : "0.00";
+        kpis[`${type}AHTMinsWithoutEscalations`] = counts[`${type}AHTWithoutEsc`] > 0 ? (sums[`${type}AHTWithoutEscMillis`] / counts[`${type}AHTWithoutEsc`] / 60000).toFixed(2) : "0.00";
+    });
+
+    // ✅ 3. MERGE THE RESULTS FROM THE NEW FUNCTION
+    kpis.avgObqAHTMins = obqAhtResults.avgObqAHTMins;
+    kpis.obqAHTMinsWithEscalations = obqAhtResults.obqAHTMinsWithEscalations;
+    kpis.obqAHTMinsWithoutEscalations = obqAhtResults.obqAHTMinsWithoutEscalations;
+    
+    const uniqueMarkets = new Set(allSubTaskValues.map(r => (r[COL_SUBTASK_MARKET] || "").toString().trim()).filter(Boolean));
+    const uniqueTaskTypes = new Set(allSubTaskValues.map(r => (r[COL_SUBTASK_TASK_TYPE] || "").toString().trim()).filter(Boolean));
+    const dropdownOptions = { markets: Array.from(uniqueMarkets).sort(), taskTypes: Array.from(uniqueTaskTypes).sort() };
+    
+    let tableCaseIds;
+    // Handle the table drill-down for the new OBQ KPI
+    const obqKpiFilters = ['avgOnboardingQualifyAHTMins', 'obqAHTMinsWithEscalations', 'obqAHTMinsWithoutEscalations'];
+    if (obqKpiFilters.includes(kpiFilter)) {
+      tableCaseIds = obqAhtResults.caseIdsForTable;
+    } 
+    else if (kpiFilter === 'totalCases') tableCaseIds = completedCasesInFilter;
+    else if (kpiFilter === 'inProgressTotalCases') tableCaseIds = inProgressCaseIds;
+    else if (kpiFilter === 'totalHandledCases') tableCaseIds = handledCaseIds;
+    else if (kpiFilter === 'casesWithEscalations') tableCaseIds = escalatedCasesInFilter;
+    else if (kpiFilter === 'casesWithoutEscalations') tableCaseIds = new Set([...handledCaseIds].filter(id => !escalatedCasesInFilter.has(id)));
+    else if (kpiFilter === 'integrationPendingCases') tableCaseIds = new Set(Array.from(cases.keys()).filter(id => cases.get(id).tasks.some(t => (t[COL_SUBTASK_TASK_TYPE] || "").toString().trim() === "Integration" && !t[COL_SUBTASK_END_TIMESTAMP])));
+    else if (kpiFilter === 'totalCasesWithIntegration') tableCaseIds = integrationCaseIds;
+    else if (kpiFilter === 'avgEscalatedTimeMins') tableCaseIds = caseIdsForAvgEscTime;
+    else if (kpiFilter) tableCaseIds = tempCaseIds;
+    else tableCaseIds = new Set(cases.keys());
+    
+    const tableData = [];
+    tableCaseIds.forEach(caseId => {
+        const dataSource = (kpiFilter && kpiFilter !== 'totalCases') ? allCases : cases;
+        if (dataSource.has(caseId)) {
+            const caseData = dataSource.get(caseId);
+            
+            let specificTask = null;
+            if (kpiFilter === 'totalHandledCases' || kpiFilter === 'casesWithEscalations' || kpiFilter === 'casesWithoutEscalations' || kpiFilter === 'inProgressTotalCases' || kpiFilter === 'avgEscalatedTimeMins') {
+                specificTask = handledTasksMap.get(caseId);
+            } else if (obqKpiFilters.includes(kpiFilter)) {
+                specificTask = (matchingTasksMap.get(caseId) || [null])[0]; // For OBQ, get the first matching task
+            } else if (kpiFilter && kpiFilter.includes('AHT')) {
+                specificTask = caseData.tasks.find(t => (tempCaseIds.has(caseId))) || handledTasksMap.get(caseId);
+            }
+             else if (filters.taskType) {
+                 specificTask = (matchingTasksMap.get(caseId) || [null])[0];
+            }
+
+            const createdDate = specificTask ? assistantParseDateString(specificTask[COL_SUBTASK_START_TIMESTAMP]) : caseData.earliestStartDate;
+            const endDate = specificTask ? assistantParseDateString(specificTask[COL_SUBTASK_END_TIMESTAMP]) : caseData.latestEndDate;
+            const taskTypeDisplay = specificTask ? specificTask[COL_SUBTASK_TASK_TYPE] : findMainTaskType(caseData.tasks);
+            const statusDisplay = caseData.status || (endDate ? 'Completed' : 'In Progress');
+
+            tableData.push({
+                caseId: caseId,
+                market: caseData.market,
+                agent: caseData.agent,
+                status: statusDisplay,
+                created: createdDate ? createdDate.toISOString() : null,
+                endTimestamp: endDate ? endDate.toISOString() : null,
+                isEscalated: allEscalatedCaseIds.has(caseId),
+                taskType: taskTypeDisplay
+            });
+        }
+    });
+    
+    const chartData = {};
+    Object.keys(taskTypeChartAggregates).forEach(taskType => {
+        const agg = taskTypeChartAggregates[taskType];
+        chartData[taskType] = {
+            avgTatHours: agg.tatCount > 0 ? (agg.tatMillis / agg.tatCount / 3600000) : 0,
+            avgTatDays: agg.tatCount > 0 ? (agg.tatMillis / agg.tatCount / 86400000) : 0,
+            avgAhtMins: agg.ahtCount > 0 ? (agg.ahtMillis / agg.ahtCount / 60000) : 0,
+            escCount: agg.escCount,
+            nonEscCount: agg.nonEscCount
+        };
+    });
+
+    return {
+      kpis: kpis, dropdownOptions: dropdownOptions, tableData: tableData,
+      chartData: chartData, adhocCounts: adhocCounts,
+      lastRefreshed: new Date().toLocaleString(undefined, { timeZone: Session.getScriptTimeZone() }),
+      error: null
+    };
+  } catch (error) {
+    Logger.log("CRITICAL Error in getDashboardData: " + error.toString() + " Stack: " + error.stack);
+    return { error: "Major error calculating dashboard data: " + error.message };
+  }
+}
+
+// =================================================================================== //
+// ==========            HELPER FUNCTIONS                          ====================== //
+// =================================================================================== //
+
+function filterCases_(allCases, filters) {
+    const { startDate, endDate, market, taskType } = filters;
+    const filteredCases = new Map();
+    const matchingTasksMap = new Map();
+
+    const filterStartDate = startDate ? assistantParseDateDashed(startDate) : null;
+    const filterEndDate = endDate ? assistantParseDateDashed(endDate) : null;
+    if (filterStartDate) filterStartDate.setHours(0, 0, 0, 0);
+    if (filterEndDate) filterEndDate.setHours(23, 59, 59, 999);
+
+    allCases.forEach((caseData, caseId) => {
+        if (market && (caseData.market || "").toString().trim() !== market) {
+            return;
+        }
+        const caseMatchingTasks = [];
+        for (const task of caseData.tasks) {
+            const currentTaskType = (task[COL_SUBTASK_TASK_TYPE] || "").toString().trim();
+            if (taskType && currentTaskType !== taskType) {
+                continue;
+            }
+            const taskStart = assistantParseDateString(task[COL_SUBTASK_START_TIMESTAMP]);
+            const taskEnd = assistantParseDateString(task[COL_SUBTASK_END_TIMESTAMP]);
+            
+            // ✅ Corrected & Final Logic: Strict "Contained Within" Filter
+            let isDateMatch = false; // Default to not matching
+
+            // A task must have a start and end date to be considered.
+            if (taskStart && taskEnd) {
+                // Check if the task's start date is on or after the filter's start date.
+                const startedAfterFilterStart = !filterStartDate || taskStart >= filterStartDate;
+                
+                // Check if the task's end date is on or before the filter's end date.
+                const endedBeforeFilterEnd = !filterEndDate || taskEnd <= filterEndDate;
+        
+                // A task is only a match if BOTH conditions are true.
+                if (startedAfterFilterStart && endedBeforeFilterEnd) {
+                    isDateMatch = true;
+                }
+            }
+
+            if (isDateMatch) {
+                caseMatchingTasks.push(task);
+            }
+        }
+        if (caseMatchingTasks.length > 0) {
+            filteredCases.set(caseId, caseData);
+            matchingTasksMap.set(caseId, caseMatchingTasks);
+        }
+    });
+
+    return { filteredCases, matchingTasksMap };
+}
+
+function assistantParseDateDashed(dateStr) {
+    if (!dateStr || typeof dateStr !== 'string') return null;
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+        const d = new Date(parts[0], parseInt(parts[1], 10) - 1, parts[2]);
+        if (!isNaN(d.getTime())) {
+            return d;
+        }
+    }
+    return assistantParseDateString(dateStr);
+}
+
+function assistantParseDateString(dateStr) {
+  if (!dateStr) return null;
+  if (dateStr instanceof Date && !isNaN(dateStr.getTime())) return dateStr;
+  if (typeof dateStr !== 'string') return null;
+  dateStr = dateStr.trim();
+  if (dateStr === "") return null;
+  const dAttempt = new Date(dateStr);
+  if (!isNaN(dAttempt.getTime())) return dAttempt;
+  if (!isNaN(parseFloat(dateStr)) && isFinite(dateStr)) {
+    const numVal = parseFloat(dateStr);
+    if (numVal > 20000 && numVal < 70000) {
+      try {
+        const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+        const jsDate = new Date(excelEpoch.getTime() + numVal * 24 * 60 * 60 * 1000);
+        if (!isNaN(jsDate.getTime())) return jsDate;
+      } catch (ex) {}
+    }
+  }
+  return null;
+}
+
+function findMainTaskType(tasks) {
+    const taskTypes = new Set(tasks.map(t => (t[COL_SUBTASK_TASK_TYPE] || "").toString().trim()));
+    if (taskTypes.has("Integration")) return "Integration";
+    if (taskTypes.has("Asset Delivery")) return "Asset Delivery";
+    if (taskTypes.has("Menu Creation")) return "Menu Creation";
+    return Array.from(taskTypes)[0] || "N/A";
+}
+
+
+function getKpiCalculationReport(filters, kpiId) {
+    try {
+        const log = [];
+        const ss = SpreadsheetApp.getActiveSpreadsheet();
+        const sheetSubTask = ss.getSheetByName(SHEET_NAME_SUB_TASK);
+        if (!sheetSubTask) throw new Error(`Sheet "${SHEET_NAME_SUB_TASK}" not found.`);
+
+        const allSubTaskValues = sheetSubTask.getDataRange().getValues();
+        allSubTaskValues.shift();
+        
+        log.push({
+            title: "Step 1: Initial Data Load & Grouping",
+            summary: `Loaded ${allSubTaskValues.length} task rows and grouped them into ${new Set(allSubTaskValues.map(r=>r[COL_SUBTASK_CASE_ID])).size} cases.`
+        });
+
+        const allCases = new Map();
+        allSubTaskValues.forEach(row => {
+            const caseId = (row[COL_SUBTASK_CASE_ID] || "").toString().trim();
+            if (!caseId) return;
+            if (!allCases.has(caseId)) {
+                allCases.set(caseId, { tasks: [], market: row[COL_SUBTASK_MARKET]});
+            }
+            allCases.get(caseId).tasks.push(row);
+        });
+        
+        const filterStartDate = filters.startDate ? assistantParseDateDashed(filters.startDate) : null;
+        const filterEndDate = filters.endDate ? assistantParseDateDashed(filters.endDate) : null;
+        if (filterStartDate) filterStartDate.setHours(0, 0, 0, 0);
+        if (filterEndDate) filterEndDate.setHours(23, 59, 59, 999);
+        
+        const ahtKpiRegex = /^(avg|.*AHTMins)/;
+        if (ahtKpiRegex.test(kpiId) && !kpiId.includes('avgEscalatedTime')) {
+             log.push({
+                title: "Step 2: Logic for AHT Calculation",
+                summary: `This KPI calculates an Average Handling Time. It finds all relevant tasks and calculates their duration (End Timestamp - Start Timestamp). It then subtracts any pause time, and crucially, subtracts only the portion of any escalation that actually overlapped with the task's active work time.`
+            });
+             log.push({
+                title: "Step 3: Final Calculation",
+                summary: `The final number is the average of these calculated durations in minutes. The 'w/ Escalations' and 'w/o Escalations' versions further filter this group based on whether the case appears in the Escalation Logs.`
+            });
+             return { log, error: null };
+        }
+        
+        switch (kpiId) {
+            case 'totalHandledCases':
+            case 'casesWithEscalations':
+            case 'casesWithoutEscalations':
+            case 'avgEscalatedTimeMins':
+                {
+                    const handledCaseIds = new Set();
+                    allCases.forEach((caseData, caseId) => {
+                        if (filters.market && caseData.market !== filters.market) return;
+                        for (const task of caseData.tasks) {
+                            if (filters.taskType && (task[COL_SUBTASK_TASK_TYPE] || "").toString().trim() !== filters.taskType) continue;
+                            const taskStart = assistantParseDateString(task[COL_SUBTASK_START_TIMESTAMP]);
+                            if ((filterStartDate && taskStart >= filterStartDate && taskStart <= filterEndDate) || (!filterStartDate && taskStart)) {
+                                handledCaseIds.add(caseId);
+                                break;
+                            }
+                        }
+                    });
+                    log.push({
+                        title: "Step 2: Identify 'Handled Cases'",
+                        summary: `First, identify all cases that started within the date range (respecting market/task filters), ignoring their end date. This resulted in ${handledCaseIds.size} 'handled cases' to be analyzed.`
+                    });
+                    
+                    const escalationData = ss.getSheetByName(SHEET_NAME_ESCALATION_LOGS).getDataRange().getValues();
+                    escalationData.shift();
+                    let relevantEscalationData = escalationData;
+                    if(filters.taskType) {
+                        relevantEscalationData = escalationData.filter(row => (row[COL_LOGS_TASK_TYPE] || "").toString().trim() === filters.taskType);
+                    }
+                    const allEscalatedCaseIds = new Set(relevantEscalationData.map(row => (row[COL_LOGS_RELATED_CASE_ID] || "").toString().trim()));
+                    const escalatedInFilter = new Set([...handledCaseIds].filter(id => allEscalatedCaseIds.has(id)));
+                    
+                    if (kpiId.includes('Escalation')) {
+                         log.push({
+                            title: "Step 3: Check Against Escalation Logs",
+                            summary: `Of the ${handledCaseIds.size} handled cases, checked which ones have a relevant entry in the '${SHEET_NAME_ESCALATION_LOGS}'. Found ${escalatedInFilter.size} escalated cases.`
+                        });
+                    }
+
+                    if (kpiId === 'casesWithoutEscalations') {
+                        log.push({
+                            title: "Step 4: Final Calculation",
+                            summary: `Subtracted the escalated cases from the total handled cases (${handledCaseIds.size} - ${escalatedInFilter.size}). The result is ${handledCaseIds.size - escalatedInFilter.size}.`
+                        });
+                    }
+                    if (kpiId === 'avgEscalatedTimeMins') {
+                        const caseIdsForAvgEscTime = new Set();
+                        relevantEscalationData.forEach(eRow => {
+                            const caseId = (eRow[COL_LOGS_RELATED_CASE_ID] || "").toString().trim();
+                            if (handledCaseIds.has(caseId)) {
+                                const start = assistantParseDateString(eRow[COL_LOGS_START_TIME]);
+                                const end = assistantParseDateString(eRow[COL_LOGS_END_TIME]);
+                                if (!start || !end) return;
+                                if (filterEndDate && end > filterEndDate) return;
+                                caseIdsForAvgEscTime.add(caseId);
+                            }
+                        });
+                        log.push({
+                            title: "Step 4: Filter Escalations for Averaging",
+                            summary: `From the list of escalated cases, a second filter is applied. Only escalations that are completed (have an end date) and ended before the filter's End Date are included in the average. This resulted in ${caseIdsForAvgEscTime.size} cases with valid escalations.`
+                        });
+                         log.push({
+                            title: "Step 5: Final Calculation",
+                            summary: `The final KPI is the average duration of only these specific, valid escalations.`
+                        });
+                    }
+                }
+                break;
+
+            case 'inProgressTotalCases': {
+                const inProgressCaseIds = new Set();
+                allCases.forEach((caseData, caseId) => {
+                    if (filters.market && caseData.market !== filters.market) return;
+                    for (const task of caseData.tasks) {
+                         if (filters.taskType && (task[COL_SUBTASK_TASK_TYPE] || "").toString().trim() !== filters.taskType) continue;
+                        const taskStart = assistantParseDateString(task[COL_SUBTASK_START_TIMESTAMP]);
+                        const taskEnd = assistantParseDateString(task[COL_SUBTASK_END_TIMESTAMP]);
+                        let isConsideredInProgress = false;
+                        if (filterStartDate && filterEndDate) {
+                            if (taskStart && taskStart >= filterStartDate && taskStart <= filterEndDate && (!taskEnd || taskEnd > filterEndDate)) {
+                                isConsideredInProgress = true;
+                            }
+                        } else if (!filterStartDate && !filterEndDate && !taskEnd) {
+                           isConsideredInProgress = true;
+                        }
+                        if (isConsideredInProgress) {
+                            inProgressCaseIds.add(caseId);
+                            break;
+                        }
+                    }
+                });
+                log.push({
+                    title: "Step 2: Logic for 'In-Progress Cases'",
+                    summary: `Searched all tasks for cases that either started in the date range and ended after it, or (if no date range is set) have no end date at all. Found ${inProgressCaseIds.size} matching cases.`
+                });
+                break;
+            }
+
+            default: {
+                 const { filteredCases } = filterCases_(allCases, filters);
+                 log.push({
+                    title: "Step 2: Applying Standard Filters",
+                    summary: `Applied standard filters (task must start AND end within the date range). This resulted in ${filteredCases.size} cases to be used for this KPI's calculation.`
+                });
+                 break;
+            }
+        }
+
+        return { log: log, error: null };
+    } catch (e) {
+        Logger.log(`CRITICAL Error in getKpiCalculationReport: ${e.toString()}`);
+        return { error: `Error generating report: ${e.message}` };
+    }
+}
+
+
+
+
+
+
+function debugObqAHTCalculation() {
+  Logger.log("========= STARTING OBQ AHT DEBUG LOG ==========");
+
+  // --- CONFIGURE YOUR FILTERS HERE ---
+  // Filters are pre-set as requested.
+  const filters = {
+    startDate: "2025-08-11",
+    endDate: "2025-08-22",
+    market: null,
+    taskType: "Onboarding Qualify"
+  };
+  Logger.log(`Running with filters: ${JSON.stringify(filters)}`);
+  // ------------------------------------
+
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheetSubTask = ss.getSheetByName(SHEET_NAME_SUB_TASK);
+    const sheetEscalation = ss.getSheetByName(SHEET_NAME_ESCALATION_LOGS);
+    const sheetPause = ss.getSheetByName(SHEET_NAME_PAUSE_LOGS);
+
+    const allSubTaskValues = sheetSubTask.getDataRange().getValues();
+    allSubTaskValues.shift();
+    let escalationData = sheetEscalation ? sheetEscalation.getDataRange().getValues() : [[]];
+    escalationData.shift();
+    let pauseData = sheetPause ? sheetPause.getDataRange().getValues() : [[]];
+    pauseData.shift();
+
+    const allCases = new Map();
+    allSubTaskValues.forEach(row => {
+      const caseId = (row[COL_SUBTASK_CASE_ID] || "").toString().trim();
+      if (!caseId) return;
+      if (!allCases.has(caseId)) {
+        allCases.set(caseId, { tasks: [], market: row[COL_SUBTASK_MARKET] });
+      }
+      allCases.get(caseId).tasks.push(row);
+    });
+
+    const { filteredCases, matchingTasksMap } = filterCases_(allCases, filters);
+    const cases = filteredCases;
+    Logger.log(`Found ${cases.size} cases that match the initial filters.`);
+    if (cases.size === 0) {
+      Logger.log("No cases found. Check your filters or the filterCases_ function logic.");
+      Logger.log("========= END OF DEBUG LOG ==========");
+      return;
+    }
+
+    // Pre-calculate Pause and Escalation data for efficiency
+    const pauseMap = new Map();
+    pauseData.forEach(pRow => {
+      const caseId = (pRow[COL_LOGS_RELATED_CASE_ID] || "").toString().trim();
+      const start = assistantParseDateString(pRow[COL_LOGS_START_TIME]);
+      const end = assistantParseDateString(pRow[COL_LOGS_END_TIME]);
+      if (caseId && start && end && end > start) {
+        pauseMap.set(caseId, (pauseMap.get(caseId) || 0) + (end.getTime() - start.getTime()));
+      }
+    });
+
+    const ahtEscalationOverlapMap = new Map();
+    escalationData.forEach(eRow => {
+        const caseId = (eRow[COL_LOGS_RELATED_CASE_ID] || "").toString().trim();
+        const taskType = (eRow[COL_LOGS_TASK_TYPE] || "").toString().trim();
+        const key = `${caseId}-${taskType}`;
+        const task = (matchingTasksMap.get(caseId) || []).find(t => (t[COL_SUBTASK_TASK_TYPE] || "").toString().trim() === taskType);
+        if (task) {
+            const taskStart = assistantParseDateString(task[COL_SUBTASK_START_TIMESTAMP]);
+            const taskEnd = assistantParseDateString(task[COL_SUBTASK_END_TIMESTAMP]);
+            const escStart = assistantParseDateString(eRow[COL_LOGS_START_TIME]);
+            const escEnd = assistantParseDateString(eRow[COL_LOGS_END_TIME]);
+            if (taskStart && taskEnd && escStart && escEnd) {
+                const overlapStart = Math.max(taskStart.getTime(), escStart.getTime());
+                const overlapEnd = Math.min(taskEnd.getTime(), escEnd.getTime());
+                const duration = overlapEnd - overlapStart;
+                if (duration > 0) {
+                    ahtEscalationOverlapMap.set(key, (ahtEscalationOverlapMap.get(key) || 0) + duration);
+                }
+            }
+        }
+    });
+
+    // Re-run the calculation with detailed logging
+    let sumMillis = 0;
+    let count = 0;
+
+    cases.forEach((caseData, caseId) => {
+      const tasksToProcess = matchingTasksMap.get(caseId) || [];
+      tasksToProcess.forEach(task => {
+        const taskType = (task[COL_SUBTASK_TASK_TYPE] || "").toString().trim();
+        if (taskType !== "Onboarding Qualify") return;
+
+        Logger.log(`\n--- Processing Case ID: ${caseId} ---`);
+        const start = assistantParseDateString(task[COL_SUBTASK_START_TIMESTAMP]);
+        const end = assistantParseDateString(task[COL_SUBTASK_END_TIMESTAMP]);
+        
+        if (!start || !end || end < start) {
+          Logger.log(`SKIPPED: Invalid or missing start/end timestamps.`);
+          return;
+        }
+
+        const rawDuration = end.getTime() - start.getTime();
+        const pauseDuration = pauseMap.get(caseId) || 0;
+        const escalationDuration = ahtEscalationOverlapMap.get(`${caseId}-${taskType}`) || 0;
+        const specificAht = rawDuration - pauseDuration - escalationDuration;
+
+        Logger.log(`  Start Time: ${start.toLocaleString()}`);
+        Logger.log(`  End Time:   ${end.toLocaleString()}`);
+        Logger.log(`  (A) Raw Duration: ........ ${rawDuration / 60000} mins`);
+        Logger.log(`  (B) Pause Time: .......... - ${pauseDuration / 60000} mins`);
+        Logger.log(`  (C) Escalation Overlap: .. - ${escalationDuration / 60000} mins`);
+        Logger.log(`  -----------------------------------------`);
+        Logger.log(`  (=) Final AHT (A-B-C): ... ${specificAht / 60000} mins`);
+        
+        if (specificAht > 0) {
+          sumMillis += specificAht;
+          count++;
+          Logger.log(`  ✅ RESULT: INCLUDED in calculation. New Count: ${count}, New Total Sum (mins): ${sumMillis / 60000}`);
+        } else {
+          Logger.log(`  ❌ RESULT: SKIPPED because Final AHT is zero or negative.`);
+        }
+      });
+    });
+
+    Logger.log("\n========= FINAL CALCULATION SUMMARY =========");
+    Logger.log(`Total AHT in Milliseconds: ${sumMillis}`);
+    Logger.log(`Total Number of Cases Counted: ${count}`);
+    const finalAvg = count > 0 ? (sumMillis / count / 60000).toFixed(2) : "0.00";
+    Logger.log(`Final Average (AHT in Mins): ${finalAvg}`);
+    Logger.log("==============================================");
+
+  } catch (e) {
+    Logger.log(`CRITICAL ERROR during debug: ${e.toString()} \nStack: ${e.stack}`);
+  }
+}
+
+
+
+
+// =================================================================================== //
+// ==========     NEW ISOLATED FUNCTION FOR OBQ AHT CALCULATION     ================== //
+// =================================================================================== //
+
+function getObqAhtKpi(filters, allSubTaskValues, pauseData, escalationData) {
+  const output = {
+    avgObqAHTMins: "0.00",
+    obqAHTMinsWithEscalations: "0.00",
+    obqAHTMinsWithoutEscalations: "0.00",
+    caseIdsForTable: new Set()
+  };
+
+  try {
+    const allCases = new Map();
+    allSubTaskValues.forEach(row => {
+      const caseId = (row[COL_SUBTASK_CASE_ID] || "").toString().trim();
+      if (!caseId) return;
+      if (!allCases.has(caseId)) {
+        allCases.set(caseId, { tasks: [], market: row[COL_SUBTASK_MARKET] });
+      }
+      allCases.get(caseId).tasks.push(row);
+    });
+
+    const obqFilters = { ...filters, taskType: "Onboarding Qualify" };
+    const { filteredCases, matchingTasksMap } = filterCases_(allCases, obqFilters);
+    const cases = filteredCases;
+
+    if (cases.size === 0) {
+      return output;
+    }
+
+    const pauseMap = new Map();
+    pauseData.forEach(pRow => {
+      const caseId = (pRow[COL_LOGS_RELATED_CASE_ID] || "").toString().trim();
+      const start = assistantParseDateString(pRow[COL_LOGS_START_TIME]);
+      const end = assistantParseDateString(pRow[COL_LOGS_END_TIME]);
+      if (caseId && start && end && end > start) {
+        pauseMap.set(caseId, (pauseMap.get(caseId) || 0) + (end.getTime() - start.getTime()));
+      }
+    });
+
+    const ahtEscalationOverlapMap = new Map();
+    escalationData.forEach(eRow => {
+        const caseId = (eRow[COL_LOGS_RELATED_CASE_ID] || "").toString().trim();
+        const taskType = (eRow[COL_LOGS_TASK_TYPE] || "").toString().trim();
+        if (taskType !== "Onboarding Qualify") return;
+
+        const task = (matchingTasksMap.get(caseId) || []).find(t => (t[COL_SUBTASK_TASK_TYPE] || "").toString().trim() === taskType);
+        if (task) {
+            const taskStart = assistantParseDateString(task[COL_SUBTASK_START_TIMESTAMP]);
+            const taskEnd = assistantParseDateString(task[COL_SUBTASK_END_TIMESTAMP]);
+            const escStart = assistantParseDateString(eRow[COL_LOGS_START_TIME]);
+            const escEnd = assistantParseDateString(eRow[COL_LOGS_END_TIME]);
+            if (taskStart && taskEnd && escStart && escEnd) {
+                const overlapStart = Math.max(taskStart.getTime(), escStart.getTime());
+                const overlapEnd = Math.min(taskEnd.getTime(), escEnd.getTime());
+                const duration = overlapEnd - overlapStart;
+                if (duration > 0) {
+                    const key = `${caseId}-${taskType}`;
+                    ahtEscalationOverlapMap.set(key, (ahtEscalationOverlapMap.get(key) || 0) + duration);
+                }
+            }
+        }
+    });
+    
+    const relevantEscalationData = escalationData.filter(row => (row[COL_LOGS_TASK_TYPE] || "").toString().trim() === "Onboarding Qualify");
+    const allObqEscalatedCaseIds = new Set(relevantEscalationData.map(row => (row[COL_LOGS_RELATED_CASE_ID] || "").toString().trim()));
+
+    let sums = { obqAHTMillis: 0, obqAHTWithEscMillis: 0, obqAHTWithoutEscMillis: 0 };
+    let counts = { obqAHT: 0, obqAHTWithEsc: 0, obqAHTWithoutEsc: 0 };
+    const includedCaseIds = new Set();
+
+    cases.forEach((caseData, caseId) => {
+      const tasksToProcess = matchingTasksMap.get(caseId) || [];
+      tasksToProcess.forEach(task => {
+        const start = assistantParseDateString(task[COL_SUBTASK_START_TIMESTAMP]);
+        const end = assistantParseDateString(task[COL_SUBTASK_END_TIMESTAMP]);
+        if (!start || !end || end < start) return;
+
+        const rawDuration = end.getTime() - start.getTime();
+        const pauseDuration = pauseMap.get(caseId) || 0;
+        const escalationDuration = ahtEscalationOverlapMap.get(`${caseId}-Onboarding Qualify`) || 0;
+        const specificAht = rawDuration - pauseDuration - escalationDuration;
+        
+        if (specificAht > 0) {
+          includedCaseIds.add(caseId);
+          sums.obqAHTMillis += specificAht;
+          counts.obqAHT++;
+
+          if (allObqEscalatedCaseIds.has(caseId)) {
+            sums.obqAHTWithEscMillis += specificAht;
+            counts.obqAHTWithEsc++;
+          } else {
+            sums.obqAHTWithoutEscMillis += specificAht;
+            counts.obqAHTWithoutEsc++;
+          }
+        }
+      });
+    });
+
+    output.caseIdsForTable = includedCaseIds;
+    if (counts.obqAHT > 0) {
+      output.avgObqAHTMins = (sums.obqAHTMillis / counts.obqAHT / 60000).toFixed(2);
+    }
+    if (counts.obqAHTWithEsc > 0) {
+      output.obqAHTMinsWithEscalations = (sums.obqAHTWithEscMillis / counts.obqAHTWithEsc / 60000).toFixed(2);
+    }
+    if (counts.obqAHTWithoutEsc > 0) {
+      output.obqAHTMinsWithoutEscalations = (sums.obqAHTWithoutEscMillis / counts.obqAHTWithoutEsc / 60000).toFixed(2);
+    }
+    return output;
+  } catch(e) {
+    Logger.log(`Error in getObqAhtKpi: ${e}`);
+    return output;
+  }
+}
