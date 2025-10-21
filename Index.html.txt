@@ -212,15 +212,7 @@
             </div>
         </div>
         
-        <div class="card" style="margin-top: 30px;">
-            <div class="card-body">
-            <h2>Automated Backups</h2>
-            <p class="text-secondary">A backup of all data CSVs is created daily. Here are the most recent backups available for download.</p>
-            <div id="backup-list-container" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; margin-top: 15px;">
-                <p>Loading backup list...</p>
-            </div>
-        </div>
-    </div>
+        
     
     <div class="card" style="margin-top: 30px;">
       <div class="card-body">
@@ -385,15 +377,13 @@ function checkVersion(versionInfo) {
     }
     
     function loadSettings() {
-    showView('settings-view');
-    setActiveButton('settings-btn');
-    document.getElementById('users-table-container').innerHTML = '<p>Loading users...</p>';
-    google.script.run.withSuccessHandler(displayUsers).withFailureHandler(showError).getUsersAndRoles();
-    document.getElementById('backup-list-container').innerHTML = '<p>Loading backup list...</p>';
-    google.script.run.withSuccessHandler(displayBackups).withFailureHandler(showError).getBackupList();
+    showView('settings-view');
+    setActiveButton('settings-btn');
+    document.getElementById('users-table-container').innerHTML = '<p>Loading users...</p>';
+    google.script.run.withSuccessHandler(displayUsers).withFailureHandler(showError).getUsersAndRoles();
 
-    // This line calls the function to load the audit data
-    google.script.run.withSuccessHandler(displayAuditData).withFailureHandler(showError).getAuditData();
+    // This line calls the function to load the audit data
+    google.script.run.withSuccessHandler(displayAuditData).withFailureHandler(showError).getAuditData();
 }
     
     const toLocalISOString = (dateStr) => {
