@@ -1,1064 +1,468 @@
-// =================================================================================== //
-// ==========              GLOBAL CONFIGURATION                  ====================== //
-// =================================================================================== //
-const SHEET_NAME_SUB_TASK = "Sub Task Sheet";
-const SHEET_NAME_ESCALATION_LOGS = "Escalation Logs";
-const SHEET_NAME_PAUSE_LOGS = "Pause Logs";
-const SCRIPT_APP_VERSION = "13.9"; // Corrected AHT Calculation Logic
+<!DOCTYPE html>
+<html>
+<head>
+    <base target="_top">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>O&Q Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    
+    <style>
+      :root {
+          --primary-color: #00B14F; --secondary-color: #a8d7c3; --background-color: #F0F8F5;
+          --card-background: #FFFFFF; --text-primary: #111827; --text-secondary: #6B7280;
+          --border-color: #E5E7EB; --negative-color: #EF4444; --font-family: 'Inter', sans-serif;
+      }
+      body { font-family: var(--font-family); background-color: var(--background-color); color: var(--text-primary); margin: 0; padding: 20px; font-size: 14px; }
+      .container { max-width: 1600px; margin: auto; }
+      .header { background-color: var(--card-background); padding: 20px 25px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05); }
+      .header-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+      .header-top h1 { margin: 0; font-size: 28px; font-weight: 800; color: var(--primary-color); }
+      .header-controls { display: flex; align-items: center; gap: 15px; color: var(--text-secondary); }
+      .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; }
+      .filter-item { display: flex; flex-direction: column; }
+      .filter-item label { margin-bottom: 5px; font-weight: 500; color: var(--text-secondary); }
+      .filter-item input, .filter-item select { padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-color); background-color: #f9fafb; font-family: var(--font-family); }
+      .button-primary { background-color: var(--primary-color); color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: 600; transition: background-color 0.2s; }
+      .button-primary:hover { background-color: #009d45; }
+      .button-secondary { background-color: var(--card-background); color: var(--text-primary); border: 1px solid var(--border-color); padding: 6px 14px; border-radius: 6px; cursor: pointer; font-weight: 500; transition: background-color 0.2s; }
+      .button-secondary:hover { background-color: #f9fafb; }
+      .dashboard-grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 20px; }
+      .kpi-section, .chart-card, .table-card { grid-column: span 12; }
+      .card { background-color: var(--card-background); padding: 20px 25px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05); }
+      .kpi-section h2, .chart-card h2, .table-card h2 { margin-top: 0; font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 8px; color: var(--text-primary); }
+      .kpi-section h2 svg { color: var(--text-secondary); }
+      .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 15px; }
+      .kpi-grid-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
+      .kpi-card { padding: 15px 20px; position: relative; }
+      .kpi-card h3 { margin: 0 0 5px 0; font-size: 14px; font-weight: 500; color: var(--text-secondary); display: flex; align-items: center; gap: 8px; white-space: normal; word-break: break-word; }
+      .kpi-card h3 svg { width: 16px; height: 16px; flex-shrink: 0; }
+      .kpi-card p { margin: 0 0 5px 0; font-size: 28px; font-weight: 700; }
+      .kpi-card span { font-size: 12px; color: var(--text-secondary); }
+      .kpi-card[data-kpi-id] { cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; }
+      .kpi-card[data-kpi-id]:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.07), 0 4px 6px -4px rgba(0, 0, 0, 0.07); }
+      .kpi-card.active { outline: 2px solid var(--primary-color); background-color: var(--background-color); }
+      .info-icon { position: absolute; top: 10px; right: 10px; width: 20px; height: 20px; border-radius: 50%; background-color: var(--border-color); color: var(--text-secondary); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; cursor: pointer; transition: background-color 0.2s, color 0.2s; }
+      .info-icon:hover { background-color: var(--secondary-color); color: var(--text-primary); }
+      .chart-container { height: 350px; position: relative; }
+      .table-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+      .table-controls { display: flex; gap: 10px; }
+      #tableSearch { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border-color); min-width: 250px; }
+      .table-wrapper { max-height: 500px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; }
+      #mainTable { width: 100%; border-collapse: collapse; }
+      #mainTable th, #mainTable td { padding: 12px 15px; text-align: left; border-bottom: 1px solid var(--border-color); }
+      #mainTable thead th { background-color: #f9fafb; font-weight: 600; position: sticky; top: 0; }
+      #mainTable tbody tr:last-child td { border-bottom: none; }
+      .clickable-row { cursor: pointer; transition: background-color 0.2s; }
+      .clickable-row:hover { background-color: var(--background-color); }
+      .clickable-row.active { background-color: var(--secondary-color) !important; }
+      .detail-row { display: none; }
+      .detail-content-wrapper { padding: 20px; background-color: #f9fafb; }
+      .detail-content { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+      .detail-section h4 { margin: 0 0 10px 0; border-bottom: 1px solid var(--border-color); padding-bottom: 5px; }
+      .detail-item { display: flex; flex-direction: column; gap: 4px; font-size: 13px; margin-bottom: 10px; }
+      .detail-item strong { font-weight: 600; }
+      .detail-item span { color: var(--text-secondary); }
+      .no-details { color: var(--text-secondary); font-style: italic; }
+      .loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255, 255, 255, 0.7); display: flex; justify-content: center; align-items: center; z-index: 1000; transition: opacity 0.3s; }
+      .loading-overlay.hidden { opacity: 0; pointer-events: none; }
+      .spinner { border: 4px solid rgba(0, 0, 0, 0.1); width: 36px; height: 36px; border-radius: 50%; border-left-color: var(--primary-color); animation: spin 1s ease infinite; }
+      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+      .modal { display: none; position: fixed; z-index: 1001; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.5); align-items: center; justify-content: center; }
+      .modal-content { background-color: var(--card-background); margin: auto; padding: 20px; border-radius: 12px; width: 90%; max-width: 800px; max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+      .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 15px; margin-bottom: 15px; }
+      .modal-header h2 { margin: 0; font-size: 18px; }
+      .close-button { color: var(--text-secondary); font-size: 28px; font-weight: bold; cursor: pointer; }
+      .close-button:hover, .close-button:focus { color: var(--text-primary); }
+      .modal-body { overflow-y: auto; font-family: 'Courier New', Courier, monospace; font-size: 13px; line-height: 1.6; background-color: #f9fafb; padding: 15px; border-radius: 8px; }
+      .report-links a { display: block; margin-top: 10px; font-weight: 600; color: var(--primary-color); text-decoration: none; }
+      .report-links a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="container">
+      <header class="header">
+        <div class="header-top">
+          <h1>OBQ Dashboard</h1>
+          <div class="header-controls">
+            <a id="backButton" href="#" class="button-secondary">Back to Tasks</a>
+            <span id="lastRefreshed">Loading...</span>
+            <button id="refreshButton" class="button-primary">Refresh</button>
+          </div>
+        </div>
+        <div class="filters">
+          <div class="filter-item"> <label for="dateFrom">Date From</label> <input type="date" id="dateFrom"> </div>
+          <div class="filter-item"> <label for="dateTo">Date To</label> <input type="date" id="dateTo"> </div>
+          <div class="filter-item"> <label for="marketFilter">Market</label> <select id="marketFilter"><option value="">All Markets</option></select> </div>
+          <div class="filter-item"> <label for="taskTypeFilter">Task Type</label> <select id="taskTypeFilter"><option value="">All Task Types</option></select> </div>
+        </div>
+      </header>
 
-// =================================================================================== //
-// ==========        COLUMN INDICES FOR "Sub Task Sheet"         ====================== //
-// =================================================================================== //
-const COL_SUBTASK_CASE_ID = 2;
-const COL_SUBTASK_MARKET = 3;
-const COL_SUBTASK_USER = 4;
-const COL_SUBTASK_TASK_TYPE = 5;
-const COL_SUBTASK_START_TIMESTAMP = 6;
-const COL_SUBTASK_END_TIMESTAMP = 7;
-const COL_SUBTASK_OBQ_REASONS = 8;
-const COL_SUBTASK_CASE_CREATED = 9;
-const COL_SUBTASK_STATUS = 10;
-const COL_SUBTASK_COMMENTS = 11;
-const COL_SUBTASK_ASSET_DELIVERY_DATE = 15;
-const COL_SUBTASK_ASSET_TRIGGER_DATE = 16;
-const COL_SUBTASK_POST_OBQ_TAGS = 20;
-
-// =================================================================================== //
-// ==========      COLUMN INDICES FOR "Escalation" & "Pause" Logs  =============== //
-// =================================================================================== //
-const COL_LOGS_RELATED_CASE_ID = 1;
-const COL_LOGS_TASK_TYPE = 3; 
-const COL_LOGS_START_TIME = 4;
-const COL_LOGS_END_TIME = 5;
-const COL_ESC_REASONS = 6; 
-
-// =================================================================================== //
-// ==========            SLA CONFIGURATION (in Hours)            ====================== //
-// =================================================================================== //
-const SLA_HOURS = {
-  "Onboarding Qualify": 24, "Admin Creation": 0.10, "Menu Creation": 24,
-  "Asset Delivery": 72, "Integration": 144, "default": 24
-};
-
-// =================================================================================== //
-// ==========            WEB APP & DATA ENDPOINTS                ====================== //
-// =================================================================================== //
-
-function doGet(e) {
-  const html = HtmlService.createTemplateFromFile('Index').evaluate();
-  html.setTitle(`O&Q Dashboard v${SCRIPT_APP_VERSION}`);
-  html.setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT);
-  return html;
-}
-
-function include(filename) {
-  return HtmlService.createHtmlOutputFromFile(filename).getContent();
-}
-
-function exportDataToSheet(headers, rows) {
-    try {
-        const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH'h'mm'm'");
-        const sheetName = `Dashboard Export ${timestamp}`;
-        const newSpreadsheet = SpreadsheetApp.create(sheetName);
-        const sheet = newSpreadsheet.getSheets()[0];
+      <main class="dashboard-grid">
+        <section class="kpi-section">
+            <h2><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg> Key Performance Indicators</h2>
+            <div class="kpi-grid">
+                <div class="card kpi-card" data-kpi-id="totalCases"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>Completed Total Cases <span class="info-icon" data-kpi-id="totalCases">?</span></h3><p id="totalCases">--</p><span>In Filtered Period</span></div>
+                <div class="card kpi-card" data-kpi-id="inProgressTotalCases"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>In-Progress Total Cases <span class="info-icon" data-kpi-id="inProgressTotalCases">?</span></h3><p id="inProgressTotalCases">--</p><span>Currently Active</span></div>
+                <div class="card kpi-card" data-kpi-id="avgObqAHTMins"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Avg. OBQ AHT (Mins) <span class="info-icon" data-kpi-id="avgObqAHTMins">?</span></h3><p id="avgObqAHTMins">--</p></div>
+                <div class="card kpi-card" data-kpi-id="obqAHTMinsWithEscalations"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15.09 12-2.12 2.12a2 2 0 0 1-2.83 0L8.91 12.9a2 2 0 0 1 0-2.83l2.12-2.12a2 2 0 0 1 2.83 0z"/></svg>OBQ AHT (Mins) w/ Escalations <span class="info-icon" data-kpi-id="obqAHTMinsWithEscalations">?</span></h3><p id="obqAHTMinsWithEscalations">--</p></div>
+                <div class="card kpi-card" data-kpi-id="obqAHTMinsWithoutEscalations"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15.09 12-2.12 2.12a2 2 0 0 1-2.83 0L8.91 12.9a2 2 0 0 1 0-2.83l2.12-2.12a2 2 0 0 1 2.83 0z"/></svg>OBQ AHT (Mins) w/o Escalations <span class="info-icon" data-kpi-id="obqAHTMinsWithoutEscalations">?</span></h3><p id="obqAHTMinsWithoutEscalations">--</p></div>
+                <div class="card kpi-card" data-kpi-id="avgPostObqAHTMins"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Avg. Post OBQ AHT (Mins) <span class="info-icon" data-kpi-id="avgPostObqAHTMins">?</span></h3><p id="avgPostObqAHTMins">--</p></div>
+                <div class="card kpi-card" data-kpi-id="postObqAHTMinsWithEscalations"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15.09 12-2.12 2.12a2 2 0 0 1-2.83 0L8.91 12.9a2 2 0 0 1 0-2.83l2.12-2.12a2 2 0 0 1 2.83 0z"/></svg>Post OBQ AHT (Mins) w/ Esc <span class="info-icon" data-kpi-id="postObqAHTMinsWithEscalations">?</span></h3><p id="postObqAHTMinsWithEscalations">--</p></div>
+                <div class="card kpi-card" data-kpi-id="postObqAHTMinsWithoutEscalations"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15.09 12-2.12 2.12a2 2 0 0 1-2.83 0L8.91 12.9a2 2 0 0 1 0-2.83l2.12-2.12a2 2 0 0 1 2.83 0z"/></svg>Post OBQ AHT (Mins) w/o Esc <span class="info-icon" data-kpi-id="postObqAHTMinsWithoutEscalations">?</span></h3><p id="postObqAHTMinsWithoutEscalations">--</p></div>
+                <div class="card kpi-card" data-kpi-id="avgAssetDeliveryAHTMins"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Avg. Asset Delivery AHT (Mins) <span class="info-icon" data-kpi-id="avgAssetDeliveryAHTMins">?</span></h3><p id="avgAssetDeliveryAHTMins">--</p></div>
+                <div class="card kpi-card" data-kpi-id="assetDeliveryAHTMinsWithEscalations"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15.09 12-2.12 2.12a2 2 0 0 1-2.83 0L8.91 12.9a2 2 0 0 1 0-2.83l2.12-2.12a2 2 0 0 1 2.83 0z"/></svg>Asset Delivery AHT (Mins) w/ Esc <span class="info-icon" data-kpi-id="assetDeliveryAHTMinsWithEscalations">?</span></h3><p id="assetDeliveryAHTMinsWithEscalations">--</p></div>
+                <div class="card kpi-card" data-kpi-id="assetDeliveryAHTMinsWithoutEscalations"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15.09 12-2.12 2.12a2 2 0 0 1-2.83 0L8.91 12.9a2 2 0 0 1 0-2.83l2.12-2.12a2 2 0 0 1 2.83 0z"/></svg>Asset Delivery AHT (Mins) w/o Esc <span class="info-icon" data-kpi-id="assetDeliveryAHTMinsWithoutEscalations">?</span></h3><p id="assetDeliveryAHTMinsWithoutEscalations">--</p></div>
+                <div class="card kpi-card" data-kpi-id="avgIntegrationAHTMins"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Avg. Integration AHT (Mins) <span class="info-icon" data-kpi-id="avgIntegrationAHTMins">?</span></h3><p id="avgIntegrationAHTMins">--</p></div>
+                <div class="card kpi-card" data-kpi-id="integrationAHTMinsWithEscalations"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15.09 12-2.12 2.12a2 2 0 0 1-2.83 0L8.91 12.9a2 2 0 0 1 0-2.83l2.12-2.12a2 2 0 0 1 2.83 0z"/></svg>Integration AHT (Mins) w/ Esc <span class="info-icon" data-kpi-id="integrationAHTMinsWithEscalations">?</span></h3><p id="integrationAHTMinsWithEscalations">--</p></div>
+                <div class="card kpi-card" data-kpi-id="integrationAHTMinsWithoutEscalations"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15.09 12-2.12 2.12a2 2 0 0 1-2.83 0L8.91 12.9a2 2 0 0 1 0-2.83l2.12-2.12a2 2 0 0 1 2.83 0z"/></svg>Integration AHT (Mins) w/o Esc <span class="info-icon" data-kpi-id="integrationAHTMinsWithoutEscalations">?</span></h3><p id="integrationAHTMinsWithoutEscalations">--</p></div>
+                <div class="card kpi-card" data-kpi-id="avgMenuCreationAHTMins"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Avg. Menu Creation AHT (Mins) <span class="info-icon" data-kpi-id="avgMenuCreationAHTMins">?</span></h3><p id="avgMenuCreationAHTMins">--</p></div>
+                <div class="card kpi-card" data-kpi-id="menuCreationAHTMinsWithEscalations"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15.09 12-2.12 2.12a2 2 0 0 1-2.83 0L8.91 12.9a2 2 0 0 1 0-2.83l2.12-2.12a2 2 0 0 1 2.83 0z"/></svg>Menu Creation AHT (Mins) w/ Esc <span class="info-icon" data-kpi-id="menuCreationAHTMinsWithEscalations">?</span></h3><p id="menuCreationAHTMinsWithEscalations">--</p></div>
+                <div class="card kpi-card" data-kpi-id="menuCreationAHTMinsWithoutEscalations"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15.09 12-2.12 2.12a2 2 0 0 1-2.83 0L8.91 12.9a2 2 0 0 1 0-2.83l2.12-2.12a2 2 0 0 1 2.83 0z"/></svg>Menu Creation AHT (Mins) w/o Esc <span class="info-icon" data-kpi-id="menuCreationAHTMinsWithoutEscalations">?</span></h3><p id="menuCreationAHTMinsWithoutEscalations">--</p></div>
+                <div class="card kpi-card" data-kpi-id="avgAdminCreationAHTMins"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Avg. Admin Creation AHT (Mins) <span class="info-icon" data-kpi-id="avgAdminCreationAHTMins">?</span></h3><p id="avgAdminCreationAHTMins">--</p></div>
+                <div class="card kpi-card" data-kpi-id="adminCreationAHTMinsWithEscalations"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15.09 12-2.12 2.12a2 2 0 0 1-2.83 0L8.91 12.9a2 2 0 0 1 0-2.83l2.12-2.12a2 2 0 0 1 2.83 0z"/></svg>Admin Creation AHT (Mins) w/ Esc <span class="info-icon" data-kpi-id="adminCreationAHTMinsWithEscalations">?</span></h3><p id="adminCreationAHTMinsWithEscalations">--</p></div>
+                <div class="card kpi-card" data-kpi-id="adminCreationAHTMinsWithoutEscalations"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15.09 12-2.12 2.12a2 2 0 0 1-2.83 0L8.91 12.9a2 2 0 0 1 0-2.83l2.12-2.12a2 2 0 0 1 2.83 0z"/></svg>Admin Creation AHT (Mins) w/o Esc <span class="info-icon" data-kpi-id="adminCreationAHTMinsWithoutEscalations">?</span></h3><p id="adminCreationAHTMinsWithoutEscalations">--</p></div>
+                <div class="card kpi-card" data-kpi-id="integrationPendingCases"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20.5c.5 1.5 1.5 1.5 2 0l1.4-4.2c.1-.3.4-.5.7-.6l4.2-1.4c1.5-.5 1.5-1.5 0-2l-4.2-1.4a1 1 0 0 1-.7-.6L12 3.5c-.5-1.5-1.5-1.5-2 0L8.6 7.7a1 1 0 0 1-.7.6L3.7 9.7c-1.5.5-1.5 1.5 0 2l4.2 1.4c.3.1.6.3.7.6Z"/><path d="M18 3a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h2Z"/></svg>Integration Pending Cases <span class="info-icon" data-kpi-id="integrationPendingCases">?</span></h3><p id="integrationPendingCases">--</p><span>Awaiting Integration End</span></div>
+                <div class="card kpi-card" data-kpi-id="avgAssetTriggeredAHTMins"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/></svg>Avg. Asset Triggered AHT (Mins) <span class="info-icon" data-kpi-id="avgAssetTriggeredAHTMins">?</span></h3><p id="avgAssetTriggeredAHTMins">--</p><span>Task Start to Trigger</span></div>
+                <div class="card kpi-card" data-kpi-id="avgAdhocProcessAHTMins"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Avg. Adhoc-Process AHT (Mins)<span class="info-icon" data-kpi-id="avgAdhocProcessAHTMins">?</span></h3><p id="avgAdhocProcessAHTMins">--</p></div>
+                <div class="card kpi-card" data-kpi-id="avgAdhocAdminAHTMins"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Avg. Adhoc-Admin AHT (Mins)<span class="info-icon" data-kpi-id="avgAdhocAdminAHTMins">?</span></h3><p id="avgAdhocAdminAHTMins">--</p></div>
+            </div>
+        </section>
+        <section class="kpi-section">
+          <h2><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg> Additional Metrics</h2>
+          <div class="kpi-grid">
+              <div class="card kpi-card" data-kpi-id="avgOnboardingDoneTAT"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>SLA Adherence <span class="info-icon" data-kpi-id="avgOnboardingDoneTAT">?</span></h3><p id="avgOnboardingDoneTAT">--</p><span>% of Completed Cases</span></div>
+              <div class="card kpi-card" data-kpi-id="totalCasesWithIntegration"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.72"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.72-1.72"/></svg>Cases with Integration <span class="info-icon" data-kpi-id="totalCasesWithIntegration">?</span></h3><p id="totalCasesWithIntegration">--</p><span>In Filtered Period</span></div>
+              <div class="card kpi-card" data-kpi-id="avgIntegrationTAT"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>Avg. Integration TAT (Days) <span class="info-icon" data-kpi-id="avgIntegrationTAT">?</span></h3><p id="avgIntegrationTAT">--</p><span>Turnaround Time</span></div>
+              <div class="card kpi-card" data-kpi-id="avgAssetDeliveryTAT"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>Avg. Asset Delivery TAT (Days) <span class="info-icon" data-kpi-id="avgAssetDeliveryTAT">?</span></h3><p id="avgAssetDeliveryTAT">--</p><span>Turnaround Time</span></div>
+          </div>
+        </section>
         
-        sheet.appendRow(headers);
-        if (rows && rows.length > 0) {
-            sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
-        }
+        <section class="kpi-section">
+          <h2><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h0a2 2 0 0 1 2 2v9Z"/><path d="M18 14h-8"/><path d="M18 18h-8"/><path d="M18 10h-8"/></svg> Performance Summary</h2>
+          <div class="kpi-grid-summary">
+              <div class="card kpi-card" data-kpi-id="totalHandledCases"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/></svg>Total Handled Cases <span class="info-icon" data-kpi-id="totalHandledCases">?</span></h3><p id="totalHandledCases">--</p></div>
+              <div class="card kpi-card" data-kpi-id="casesWithEscalations"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>Cases with Escalations <span class="info-icon" data-kpi-id="casesWithEscalations">?</span></h3><p id="casesWithEscalations">--</p></div>
+              <div class="card kpi-card" data-kpi-id="casesWithoutEscalations"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Cases without Escalations <span class="info-icon" data-kpi-id="casesWithoutEscalations">?</span></h3><p id="casesWithoutEscalations">--</p></div>
+              <div class="card kpi-card" data-kpi-id="avgEscalatedTimeMins"><h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6v6l4 2"/><circle cx="12" cy="12" r="10"/><path d="M18 12a6 6 0 0 0-6-6"/></svg>Avg. Escalated Time (Mins) <span class="info-icon" data-kpi-id="avgEscalatedTimeMins">?</span></h3><p id="avgEscalatedTimeMins">--</p></div>
+          </div>
+        </section>
         
-        sheet.getRange(1, 1, 1, headers.length).setFontWeight("bold");
-        sheet.autoResizeColumns(1, headers.length);
+        <section class="card chart-card" id="adhocSection">
+          <h2><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-4.44a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8.88Z"/><path d="M15.5 2v5.5h5.5"/><path d="M12 18a.969.969 0 0 0-1 1v0a1 1 0 0 0 1 1h.01a1 1 0 0 0 1-1v0a.969.969 0 0 0-1-1Z"/><path d="M12 12v2"/><path d="M12 7.5a2.5 2.5 0 0 1 2.5 2.5c0 1.5-2.5 3-2.5 3s-2.5-1.5-2.5-3A2.5 2.5 0 0 1 12 7.5Z"/></svg> Post OBQ Tags Processes Utilization</h2>
+          <div class="chart-container"><canvas id="postObqTagsChart"></canvas></div>
+        </section>
+
+        <section class="card chart-card"><h2>Cases by Market</h2><div class="chart-container"><canvas id="marketChart"></canvas></div></section>
+        <section class="card chart-card"><h2>KPI Averages by Task Type (Hours)</h2><div class="chart-container"><canvas id="kpiChart"></canvas></div></section>
+        <section class="card chart-card"><h2>Additional Metrics by Task Type (Days)</h2><div class="chart-container"><canvas id="additionalMetricsChart"></canvas></div></section>
+        <section class="card chart-card"><h2>Performance Summary by Task Type</h2><div class="chart-container"><canvas id="performanceChart"></canvas></div></section>
         
-        Logger.log(`Successfully created sheet: ${newSpreadsheet.getUrl()}`);
-        return newSpreadsheet.getUrl();
-    } catch (e) {
-        Logger.log(`CRITICAL Error in exportDataToSheet: ${e.toString()}`);
-        return null;
-    }
-}
+        <section class="card table-card">
+          <div class="table-header">
+            <h2><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22h6a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v10"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M3 15h6"/><path d="M5 12h1"/><path d="M4 18h4"/></svg> Case Details</h2>
+            <div class="table-controls">
+              <input type="text" id="tableSearch" placeholder="Search cases..."><button id="downloadButton" class="button-secondary">Download</button>
+            </div>
+          </div>
+          <div class="table-wrapper">
+            <table id="mainTable">
+              <thead><tr><th>Case ID</th><th>Market</th><th>Agent</th><th>Status</th><th>Created</th><th>End Timestamp</th><th>Escalated</th><th>Task Type</th></tr></thead>
+              <tbody id="mainTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+        
+        <section class="card table-card">
+            <h2>Generate Monthly Utilization Report</h2>
+            <div id="reportLinksContainer" class="report-links">
+                <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 15px;">
+                  Click the button to start the full performance report generation. This process runs in the background.
+                </p>
+            </div>
+            <button id="runReportButton" class="button-primary">Run Monthly Report Generator</button>
+        </section>
+      </main>
+    </div>
 
+    <div id="reportModal" class="modal">
+      <div class="modal-content">
+        <div class="modal-header"><h2 id="modalTitle">Calculation Report</h2><span class="close-button">&times;</span></div>
+        <div class="modal-body" id="modalBody"></div>
+      </div>
+    </div>
 
-function getCaseDetails(caseId) {
-    try {
-        if (!caseId) throw new Error("No Case ID provided.");
-        const ss = SpreadsheetApp.getActiveSpreadsheet();
-        const caseIdTrimmed = caseId.toString().trim();
-        const findAndMapData = (sheetName, idColumnIndex, mappingFunction) => {
-            const sheet = ss.getSheetByName(sheetName);
-            if (!sheet || sheet.getLastRow() < 2) return [];
-            const textFinder = sheet.createTextFinder(caseIdTrimmed).matchEntireCell(true);
-            const foundRanges = textFinder.findAll();
-            return foundRanges
-                .filter(range => range.getColumn() === idColumnIndex + 1)
-                .map(range => {
-                    const row = sheet.getRange(range.getRow(), 1, 1, sheet.getLastColumn()).getValues()[0];
-                    return mappingFunction(row);
-                });
-        };
-        const taskMapper = row => ({
-            taskType: row[COL_SUBTASK_TASK_TYPE], status: row[COL_SUBTASK_STATUS],
-            start: row[COL_SUBTASK_START_TIMESTAMP] ? new Date(row[COL_SUBTASK_START_TIMESTAMP]).toISOString() : null,
-            end: row[COL_SUBTASK_END_TIMESTAMP] ? new Date(row[COL_SUBTASK_END_TIMESTAMP]).toISOString() : null,
-            obqReasons: row[COL_SUBTASK_OBQ_REASONS], comments: row[COL_SUBTASK_COMMENTS]
+    <div id="loadingOverlay" class="loading-overlay"><div class="spinner"></div></div>
+    
+    <script>
+      let allData = {}; let currentKpiFilter = null; const chartInstances = {};
+      const loadingOverlay = document.getElementById('loadingOverlay');
+      const refreshButton = document.getElementById('refreshButton');
+      const dateFrom = document.getElementById('dateFrom');
+      const dateTo = document.getElementById('dateTo');
+      const marketFilter = document.getElementById('marketFilter');
+      const taskTypeFilter = document.getElementById('taskTypeFilter');
+      const tableSearch = document.getElementById('tableSearch');
+      const mainTableBody = document.getElementById('mainTableBody');
+      const dashboardGrid = document.querySelector('.dashboard-grid'); 
+      const downloadButton = document.getElementById('downloadButton');
+      const reportModal = document.getElementById('reportModal');
+      const modalTitle = document.getElementById('modalTitle');
+      const modalBody = document.getElementById('modalBody');
+      const closeModalButton = document.querySelector('.modal .close-button');
+      const runReportButton = document.getElementById('runReportButton');
+      const reportLinksContainer = document.getElementById('reportLinksContainer');
+
+      const kpiVisibilityMap = {
+          "Integration": ["integrationPendingCases", "avgIntegrationTAT", "avgIntegrationAHTMins", "integrationAHTMinsWithEscalations", "integrationAHTMinsWithoutEscalations"],
+          "Asset Delivery": ["avgAssetTriggeredAHTMins", "avgAssetDeliveryTAT", "avgAssetDeliveryAHTMins", "assetDeliveryAHTMinsWithEscalations", "assetDeliveryAHTMinsWithoutEscalations"],
+          "Onboarding Qualify": ["avgObqAHTMins", "obqAHTMinsWithEscalations", "obqAHTMinsWithoutEscalations"],
+          "Post OBQ": ["avgPostObqAHTMins", "postObqAHTMinsWithEscalations", "postObqAHTMinsWithoutEscalations"],
+          "Menu Creation": ["avgMenuCreationAHTMins", "menuCreationAHTMinsWithEscalations", "menuCreationAHTMinsWithoutEscalations"],
+          "Admin Creation": ["avgAdminCreationAHTMins", "adminCreationAHTMinsWithEscalations", "adminCreationAHTMinsWithoutEscalations"],
+          "Adhoc-Process": ["avgAdhocProcessAHTMins"],
+          "Adhoc-Admin": ["avgAdhocAdminAHTMins"]
+      };
+      const defaultVisibleKpis = ["totalCases", "inProgressTotalCases", "avgOnboardingDoneTAT", "totalCasesWithIntegration", "totalHandledCases", "casesWithEscalations", "casesWithoutEscalations", "avgEscalatedTimeMins"];
+      
+      document.addEventListener('DOMContentLoaded', () => {
+        google.script.run.withSuccessHandler(url => { document.getElementById('backButton').href = url; }).getWebAppUrl();
+        fetchData();
+        setupEventListeners();
+      });
+      
+      function setupEventListeners() {
+          refreshButton.addEventListener('click', fetchData);
+          tableSearch.addEventListener('input', renderTable);
+          mainTableBody.addEventListener('click', handleTableClick);
+          dashboardGrid.addEventListener('click', handleDashboardGridClick);
+          downloadButton.addEventListener('click', handleDownloadClick);
+          closeModalButton.addEventListener('click', closeModal);
+          reportModal.addEventListener('click', (event) => { if (event.target === reportModal) { closeModal(); } });
+          runReportButton.addEventListener('click', handleRunReport);
+      }
+      
+      function handleDashboardGridClick(event) {
+          const kpiCard = event.target.closest('.kpi-card[data-kpi-id]');
+          const infoIcon = event.target.closest('.info-icon[data-kpi-id]');
+          if (infoIcon) { handleInfoIconClick(infoIcon); } else if (kpiCard) { handleKpiCardClick(kpiCard); }
+      }
+
+      function handleDownloadClick() {
+          const table = document.getElementById('mainTable');
+          const headers = Array.from(table.querySelectorAll('thead th')).map(th => th.textContent);
+          const rows = Array.from(table.querySelectorAll('tbody tr.clickable-row')).map(tr => Array.from(tr.querySelectorAll('td')).map(td => td.textContent));
+          if (rows.length === 0) { alert("There is no data in the table to download."); return; }
+          downloadButton.textContent = 'Generating...'; downloadButton.disabled = true;
+          google.script.run
+            .withSuccessHandler(url => { if (url) { window.open(url, '_blank'); } else { alert("Failed to create the Google Sheet."); } downloadButton.textContent = 'Download'; downloadButton.disabled = false; })
+            .withFailureHandler(err => { alert(`An error occurred: ${err.message}`); downloadButton.textContent = 'Download'; downloadButton.disabled = false; })
+            .exportDataToSheet(headers, rows);
+      }
+
+      function handleKpiCardClick(clickedCard) {
+          const kpiId = clickedCard.dataset.kpiId;
+          if (clickedCard.classList.contains('active')) { currentKpiFilter = null; clickedCard.classList.remove('active');
+          } else { document.querySelectorAll('.kpi-card.active').forEach(card => card.classList.remove('active')); clickedCard.classList.add('active'); currentKpiFilter = kpiId; }
+          fetchData();
+      }
+
+      function handleInfoIconClick(infoIcon) {
+          const kpiId = infoIcon.dataset.kpiId;
+          const cardTitle = infoIcon.closest('.kpi-card').querySelector('h3').textContent.replace('?', '').trim();
+          modalTitle.textContent = `Calculation Report: ${cardTitle}`;
+          modalBody.innerHTML = '<div class="spinner"></div> <p style="text-align:center;">Generating report...</p>';
+          openModal();
+          const filters = { startDate: dateFrom.value, endDate: dateTo.value, market: marketFilter.value, taskType: taskTypeFilter.value };
+          google.script.run
+            .withSuccessHandler(reportData => { if (reportData.error) { modalBody.innerHTML = `<p style="color: var(--negative-color);">${reportData.error}</p>`; } else { modalBody.innerHTML = buildReportHtml(reportData); } })
+            .withFailureHandler(err => { modalBody.innerHTML = `<p style="color: var(--negative-color);">Failed to generate report: ${err.message}</p>`; })
+            .getKpiCalculationReport(filters, kpiId);
+      }
+
+      function fetchData() {
+          showLoading();
+          currentKpiFilter = document.querySelector('.kpi-card.active')?.dataset.kpiId || null;
+          const filters = { 
+              startDate: dateFrom.value, 
+              endDate: dateTo.value, 
+              market: marketFilter.value, 
+              taskType: taskTypeFilter.value, 
+              kpiFilter: currentKpiFilter
+          };
+          google.script.run.withSuccessHandler(handleSuccess).withFailureHandler(handleError).getDashboardDataFromCSV(filters);
+      }
+
+      function handleSuccess(data) {
+          if (!data || data.error) { handleError({ message: data ? data.error : "Received empty or invalid data from the server." }); return; }
+          allData = data;
+          updateUI();
+          hideLoading();
+      }
+      
+      function updateUI() {
+          updateKpiVisibility(); 
+          updateKPIs(); 
+          updateDropdowns(); 
+          renderCharts(); 
+          renderTable();
+          document.getElementById('lastRefreshed').textContent = `Last Refreshed: ${allData.lastRefreshed}`;
+      }
+
+      function handleError(error) { console.error('Dashboard Error:', error.message); alert('Error: ' + error.message); hideLoading(); }
+      
+      function updateKpiVisibility() {
+        const selectedTaskType = taskTypeFilter.value;
+        const allFilterableKpiIds = Object.values(kpiVisibilityMap).flat();
+        document.querySelectorAll('.kpi-card[data-kpi-id]').forEach(card => {
+            const kpiId = card.dataset.kpiId;
+            if (defaultVisibleKpis.includes(kpiId)) {
+                card.style.display = '';
+            } else if (allFilterableKpiIds.includes(kpiId)) {
+                card.style.display = 'none';
+            }
         });
-        const escalationMapper = row => ({
-            taskType: row[COL_LOGS_TASK_TYPE],
-            start: row[COL_LOGS_START_TIME] ? new Date(row[COL_LOGS_START_TIME]).toISOString() : null,
-            end: row[COL_LOGS_END_TIME] ? new Date(row[COL_LOGS_END_TIME]).toISOString() : null,
-            reason: row[COL_ESC_REASONS]
-        });
-        const pauseMapper = row => ({
-            start: row[COL_LOGS_START_TIME] ? new Date(row[COL_LOGS_START_TIME]).toISOString() : null,
-            end: row[COL_LOGS_END_TIME] ? new Date(row[COL_LOGS_END_TIME]).toISOString() : null
-        });
-        const tasks = findAndMapData(SHEET_NAME_SUB_TASK, COL_SUBTASK_CASE_ID, taskMapper);
-        const escalations = findAndMapData(SHEET_NAME_ESCALATION_LOGS, COL_LOGS_RELATED_CASE_ID, escalationMapper);
-        const pauses = findAndMapData(SHEET_NAME_PAUSE_LOGS, COL_LOGS_RELATED_CASE_ID, pauseMapper);
-        return { tasks, escalations, pauses, error: null };
-    } catch (error) {
-        Logger.log(`CRITICAL Error in getCaseDetails: ${error.toString()}`);
-        return { error: `Error fetching details for Case ID ${caseId}: ${error.message}` };
-    }
-}
-
-
-function getDashboardData(filters = {}) {
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheetSubTask = ss.getSheetByName(SHEET_NAME_SUB_TASK);
-    const sheetEscalation = ss.getSheetByName(SHEET_NAME_ESCALATION_LOGS);
-    const sheetPause = ss.getSheetByName(SHEET_NAME_PAUSE_LOGS);
-
-    if (!sheetSubTask) throw new Error(`Sheet "${SHEET_NAME_SUB_TASK}" not found.`);
-
-    const allSubTaskValues = sheetSubTask.getDataRange().getValues();
-    allSubTaskValues.shift();
-    let escalationData = sheetEscalation ? sheetEscalation.getDataRange().getValues() : [[]];
-    escalationData.shift();
-    let pauseData = sheetPause ? sheetPause.getDataRange().getValues() : [[]];
-    pauseData.shift();
-    
-    // ✅ 1. CALL THE NEW, ISOLATED FUNCTION TO GET OBQ AHT
-    const obqAhtResults = getObqAhtKpi(filters, allSubTaskValues, pauseData, escalationData);
-    
-    const allCases = new Map();
-    const handledTasksMap = new Map(); 
-
-    allSubTaskValues.forEach(row => {
-        const caseId = (row[COL_SUBTASK_CASE_ID] || "").toString().trim();
-        if (!caseId) return;
-        if (!allCases.has(caseId)) {
-            allCases.set(caseId, { tasks: [], market: row[COL_SUBTASK_MARKET], agent: row[COL_SUBTASK_USER] });
+        if (selectedTaskType && kpiVisibilityMap[selectedTaskType]) {
+            kpiVisibilityMap[selectedTaskType].forEach(kpiId => {
+                const card = document.querySelector(`.kpi-card[data-kpi-id="${kpiId}"]`);
+                if (card) card.style.display = '';
+            });
         }
-        allCases.get(caseId).tasks.push(row);
-    });
+      }
 
-    let kpis = {};
-    const inProgressCaseIds = new Set();
-    const handledCaseIds = new Set();
-    
-    const filterStartDate = filters.startDate ? assistantParseDateDashed(filters.startDate) : null;
-    const filterEndDate = filters.endDate ? assistantParseDateDashed(filters.endDate) : null;
-    if (filterStartDate) filterStartDate.setHours(0, 0, 0, 0);
-    if (filterEndDate) filterEndDate.setHours(23, 59, 59, 999);
+      function updateKPIs() { 
+        const kpis = allData.kpis; 
+        for (const key in kpis) { 
+            const element = document.getElementById(key); 
+            if (element) { 
+                element.textContent = kpis[key] !== null && kpis[key] !== undefined ? kpis[key] : '--'; 
+            } 
+        } 
+      }
+      
+      function updateDropdowns() {
+          if (marketFilter.options.length <= 1 && allData.dropdownOptions && allData.dropdownOptions.markets) { populateSelect(marketFilter, allData.dropdownOptions.markets); }
+          if (taskTypeFilter.options.length <= 1 && allData.dropdownOptions && allData.dropdownOptions.taskTypes) { populateSelect(taskTypeFilter, allData.dropdownOptions.taskTypes); }
+      }
+      
+      function populateSelect(selectElement, options) { 
+        const currentValue = selectElement.value;
+        selectElement.innerHTML = `<option value="">${selectElement.firstElementChild.textContent}</option>`;
+        options.forEach(option => { 
+          const opt = document.createElement('option'); 
+          opt.value = option; opt.textContent = option; 
+          selectElement.appendChild(opt); 
+        }); 
+        selectElement.value = currentValue;
+      }
 
-    allCases.forEach((caseData, caseId) => {
-        if (filters.market && caseData.market !== filters.market) return;
-        let caseAddedToInProgress = false;
-        let caseAddedToHandled = false;
-        for (const task of caseData.tasks) {
-            if (filters.taskType && (task[COL_SUBTASK_TASK_TYPE] || "").toString().trim() !== filters.taskType) {
-                continue;
-            }
-            const taskStart = assistantParseDateString(task[COL_SUBTASK_START_TIMESTAMP]);
-            const taskEnd = assistantParseDateString(task[COL_SUBTASK_END_TIMESTAMP]);
-            
-            if (!caseAddedToHandled) {
-                let isConsideredHandled = false;
-                if (filterStartDate) {
-                    if (taskStart && taskStart >= filterStartDate && taskStart <= filterEndDate) {
-                        isConsideredHandled = true;
-                    }
-                } else {
-                    if (taskStart) {
-                        isConsideredHandled = true;
-                    }
-                }
-                if (isConsideredHandled) {
-                    handledCaseIds.add(caseId);
-                    handledTasksMap.set(caseId, task);
-                    caseAddedToHandled = true;
-                }
-            }
-            
-            if (!caseAddedToInProgress) {
-                 let isConsideredInProgress = false;
-                if (filterStartDate && filterEndDate) {
-                    const startedInRange = taskStart && taskStart >= filterStartDate && taskStart <= filterEndDate;
-                    const endedAfterRange = !taskEnd || taskEnd > filterEndDate;
-                    if (startedInRange && endedAfterRange) {
-                        isConsideredInProgress = true;
-                    }
-                } else if (!filterStartDate && !filterEndDate) {
-                    if (!taskEnd) {
-                        isConsideredInProgress = true;
-                    }
-                }
-                if (isConsideredInProgress) {
-                    inProgressCaseIds.add(caseId);
-                    caseAddedToInProgress = true;
-                }
-            }
-            if (caseAddedToHandled && caseAddedToInProgress) break;
-        }
-    });
-    kpis.inProgressTotalCases = inProgressCaseIds.size;
-    kpis.totalHandledCases = handledCaseIds.size;
+      function renderCharts() { 
+        const chartData = allData.chartData || {};
+        const tableData = allData.tableData || [];
+        const taskTypeLabels = Object.keys(chartData);
+        const adhocCounts = allData.adhocCounts || {};
+        const adhocSection = document.getElementById('adhocSection');
+        const adhocLabels = Object.keys(adhocCounts);
 
-    let relevantEscalationData = escalationData;
-    if(filters.taskType) {
-        relevantEscalationData = escalationData.filter(row => (row[COL_LOGS_TASK_TYPE] || "").toString().trim() === filters.taskType);
-    }
-    const allEscalatedCaseIds = new Set(relevantEscalationData.map(row => (row[COL_LOGS_RELATED_CASE_ID] || "").toString().trim()));
-    const escalatedCasesInFilter = new Set([...handledCaseIds].filter(caseId => allEscalatedCaseIds.has(caseId)));
-    
-    kpis.casesWithEscalations = escalatedCasesInFilter.size;
-    kpis.casesWithoutEscalations = handledCaseIds.size - escalatedCasesInFilter.size;
-
-    const avgEscalationDurationMap = new Map();
-    const caseIdsForAvgEscTime = new Set(); 
-    relevantEscalationData.forEach(eRow => {
-        const caseId = (eRow[COL_LOGS_RELATED_CASE_ID] || "").toString().trim();
-        if (handledCaseIds.has(caseId)) {
-            const start = assistantParseDateString(eRow[COL_LOGS_START_TIME]);
-            const end = assistantParseDateString(eRow[COL_LOGS_END_TIME]);
-            if (!start || !end) return; 
-            if (filterEndDate && end > filterEndDate) return;
-            
-            const duration = end.getTime() - start.getTime();
-            if (duration >= 0) {
-                avgEscalationDurationMap.set(caseId, (avgEscalationDurationMap.get(caseId) || 0) + duration);
-                caseIdsForAvgEscTime.add(caseId);
-            }
-        }
-    });
-    let totalAvgEscalationMillis = 0;
-    avgEscalationDurationMap.forEach(duration => totalAvgEscalationMillis += duration);
-    kpis.avgEscalatedTimeMins = caseIdsForAvgEscTime.size > 0 ? (totalAvgEscalationMillis / caseIdsForAvgEscTime.size / 60000).toFixed(2) : "0.00";
-    kpis.avgEscalationFullTimeHours = caseIdsForAvgEscTime.size > 0 ? (totalAvgEscalationMillis / caseIdsForAvgEscTime.size / 3600000).toFixed(2) : "0.00";
-
-    const { filteredCases, matchingTasksMap } = filterCases_(allCases, filters);
-    const cases = filteredCases;
-
-    const ahtEscalationOverlapMap = new Map();
-    escalationData.forEach(eRow => {
-        const caseId = (eRow[COL_LOGS_RELATED_CASE_ID] || "").toString().trim();
-        if (!matchingTasksMap.has(caseId)) return;
-        const taskType = (eRow[COL_LOGS_TASK_TYPE] || "").toString().trim();
-        const key = `${caseId}-${taskType}`;
-        const task = (matchingTasksMap.get(caseId) || []).find(t => (t[COL_SUBTASK_TASK_TYPE] || "").toString().trim() === taskType);
-        if (task) {
-            const taskStart = assistantParseDateString(task[COL_SUBTASK_START_TIMESTAMP]);
-            const taskEnd = assistantParseDateString(task[COL_SUBTASK_END_TIMESTAMP]);
-            const escStart = assistantParseDateString(eRow[COL_LOGS_START_TIME]);
-            const escEnd = assistantParseDateString(eRow[COL_LOGS_END_TIME]);
-            if (taskStart && taskEnd && escStart && escEnd) {
-                const overlapStart = Math.max(taskStart.getTime(), escStart.getTime());
-                const overlapEnd = Math.min(taskEnd.getTime(), escEnd.getTime());
-                const duration = overlapEnd - overlapStart;
-                if (duration > 0) {
-                    ahtEscalationOverlapMap.set(key, (ahtEscalationOverlapMap.get(key) || 0) + duration);
-                }
-            }
-        }
-    });
-
-    cases.forEach((caseData, caseId) => {
-        let tasksToCheckForCompletion;
-        if (filters.taskType) {
-            tasksToCheckForCompletion = matchingTasksMap.get(caseId) || [];
+        if (adhocLabels.length > 0) {
+            adhocSection.style.display = 'block';
+            const adhocData = Object.values(adhocCounts);
+            const totalAdhocCases = adhocData.reduce((sum, count) => sum + count, 0);
+            createOrUpdateChart('postObqTagsChart', 'doughnut', { labels: adhocLabels, datasets: [{ label: 'Case Count', data: adhocData, backgroundColor: ['#00b14f', '#a8d7c3', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db', '#f23f42', '#ff9f40'], borderColor: '#FFFFFF', borderWidth: 2 }] }, { plugins: { tooltip: { callbacks: { label: function(context) { const label = context.label || ''; const value = context.raw || 0; const percentage = totalAdhocCases > 0 ? ((value / totalAdhocCases) * 100).toFixed(1) : 0; return `${label}: ${value} cases (${percentage}%)`; } } }, legend: { position: 'right' }, title: { display: false } } });
         } else {
-            tasksToCheckForCompletion = caseData.tasks;
+            adhocSection.style.display = 'none';
         }
-        const isCompleted = tasksToCheckForCompletion.length > 0 && tasksToCheckForCompletion.every(
-            task => (task[COL_SUBTASK_STATUS] || "").toString().trim().toLowerCase() === 'completed'
-        );
-        caseData.status = isCompleted ? "Completed" : "In Progress";
-    });
-    
-    const subTaskData = Array.from(cases.values()).flatMap(c => c.tasks); 
-    const filteredCaseIds = new Set(cases.keys());
-    const pauseMap = new Map();
-    pauseData.forEach(pRow => {
-        const caseId = (pRow[COL_LOGS_RELATED_CASE_ID] || "").toString().trim();
-        if (filteredCaseIds.has(caseId)) {
-            const start = assistantParseDateString(pRow[COL_LOGS_START_TIME]);
-            const end = assistantParseDateString(pRow[COL_LOGS_END_TIME]);
-            if (caseId && start && end && end > start) {
-                pauseMap.set(caseId, (pauseMap.get(caseId) || 0) + (end.getTime() - start.getTime()));
-            }
-        }
-    });
-    
-    cases.forEach((caseData, caseId) => {
-        caseData.isEscalated = escalatedCasesInFilter.has(caseId);
-        let earliestStart = null, latestEnd = null;
-        caseData.tasks.forEach(task => {
-            const start = assistantParseDateString(task[COL_SUBTASK_START_TIMESTAMP]);
-            const end = assistantParseDateString(task[COL_SUBTASK_END_TIMESTAMP]);
-            if (start && (!earliestStart || start < earliestStart)) earliestStart = start;
-            if (end && (!latestEnd || end > latestEnd)) latestEnd = end;
-        });
-        caseData.earliestStartDate = earliestStart;
-        caseData.latestEndDate = latestEnd;
-    });
 
-    const kpiFilter = filters.kpiFilter;
-    let tempCaseIds = new Set();
-    
-    let sums = {
-      onboardingDoneAHTMillis: 0, integrationTATMillis: 0, assetDeliveryTATMillis: 0,
-      assetTriggeredAHTMillis: 0,
-      postObqAHTMillis: 0, postObqAHTWithEscMillis: 0, postObqAHTWithoutEscMillis: 0,
-      assetDeliveryAHTMillis: 0, assetDeliveryAHTWithEscMillis: 0, assetDeliveryAHTWithoutEscMillis: 0,
-      integrationAHTMillis: 0, integrationAHTWithEscMillis: 0, integrationAHTWithoutEscMillis: 0,
-      menuCreationAHTMillis: 0, menuCreationAHTWithEscMillis: 0, menuCreationAHTWithoutEscMillis: 0,
-      adminCreationAHTMillis: 0, adminCreationAHTWithEscMillis: 0, adminCreationAHTWithoutEscMillis: 0
-    };
-    let counts = {
-      onboardingDoneAHT: 0, integrationTAT: 0, assetDeliveryTAT: 0,
-      assetTriggeredAHT: 0, casesMetSLA: 0, integrationPending: 0,
-      postObqAHT: 0, postObqAHTWithEsc: 0, postObqAHTWithoutEsc: 0,
-      assetDeliveryAHT: 0, assetDeliveryAHTWithEsc: 0, assetDeliveryAHTWithoutEsc: 0,
-      integrationAHT: 0, integrationAHTWithEsc: 0, integrationAHTWithoutEsc: 0,
-      menuCreationAHT: 0, menuCreationAHTWithEsc: 0, menuCreationAHTWithoutEsc: 0,
-      adminCreationAHT: 0, adminCreationAHTWithEsc: 0, adminCreationAHTWithoutEsc: 0
-    };
-
-    const integrationCaseIds = new Set();
-    const taskTypeChartAggregates = {};
-    const adhocCounts = {};
-    
-    const completedCasesInFilter = new Set();
-    cases.forEach((caseData, caseId) => {
-        if ((caseData.status || "").toLowerCase() === "completed") {
-            completedCasesInFilter.add(caseId);
-        }
-    });
-    kpis.totalCases = completedCasesInFilter.size;
-
-    cases.forEach((caseData, caseId) => {
-      let hasIntegration = false, caseSlaMet = true;
-      let isIntegrationPending = false;
-      const tasksToProcess = matchingTasksMap.get(caseId) || []; 
-
-      tasksToProcess.forEach(task => {
-        const taskType = (task[COL_SUBTASK_TASK_TYPE] || "").toString().trim();
-        if (taskType === "Integration") { hasIntegration = true; if (!task[COL_SUBTASK_END_TIMESTAMP]) isIntegrationPending = true; }
-        const start = assistantParseDateString(task[COL_SUBTASK_START_TIMESTAMP]);
-        const end = assistantParseDateString(task[COL_SUBTASK_END_TIMESTAMP]);
-        if (start && end && end > start) {
-          const durationHours = (end.getTime() - start.getTime()) / 3600000;
-          const slaLimit = SLA_HOURS[taskType] || SLA_HOURS.default;
-          if (durationHours > slaLimit) caseSlaMet = false;
-        }
-      });
-      if (completedCasesInFilter.has(caseId) && caseSlaMet) {
-          counts.casesMetSLA++;
+        const marketCounts = tableData.reduce((acc, item) => { const market = item.market || 'Unknown'; acc[market] = (acc[market] || 0) + 1; return acc; }, {});
+        createOrUpdateChart('marketChart', 'doughnut', { labels: Object.keys(marketCounts), datasets: [{ label: 'Case Count', data: Object.values(marketCounts), backgroundColor: ['#00b14f', '#a8d7c3', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db'] }] });
+        
+        createOrUpdateChart('kpiChart', 'bar', { labels: taskTypeLabels, datasets: [{ label: 'Avg TAT (Hours)', data: taskTypeLabels.map(tt => chartData[tt] ? chartData[tt].avgTatHours.toFixed(2) : 0), backgroundColor: 'rgba(0, 177, 79, 0.7)' }] });
+        createOrUpdateChart('additionalMetricsChart', 'bar', { labels: taskTypeLabels, datasets: [{ label: 'Avg TAT (Days)', data: taskTypeLabels.map(tt => chartData[tt] ? chartData[tt].avgTatDays.toFixed(2) : 0), backgroundColor: 'rgba(75, 85, 99, 0.7)' }] });
+        createOrUpdateChart('performanceChart', 'bar', { labels: taskTypeLabels, datasets: [ { label: 'Avg AHT (Mins)', data: taskTypeLabels.map(tt => chartData[tt] ? chartData[tt].avgAhtMins.toFixed(2) : 0), backgroundColor: 'rgba(168, 215, 195, 0.8)'}, { label: 'Escalated Tasks', data: taskTypeLabels.map(tt => chartData[tt] ? chartData[tt].escCount : 0), backgroundColor: 'rgba(242, 63, 66, 0.7)'}, { label: 'Non-Escalated Tasks', data: taskTypeLabels.map(tt => chartData[tt] ? chartData[tt].nonEscCount : 0), backgroundColor: 'rgba(107, 114, 128, 0.7)'} ] });
       }
-      if (isIntegrationPending) counts.integrationPending++;
-      if (hasIntegration) integrationCaseIds.add(caseId);
-      const finalTask = tasksToProcess.find(t => ["Integration", "Asset Delivery", "Menu Creation"].includes((t[COL_SUBTASK_TASK_TYPE] || "").toString().trim()));
-      if (finalTask) {
-        const start = assistantParseDateString(finalTask[COL_SUBTASK_START_TIMESTAMP]);
-        const end = assistantParseDateString(finalTask[COL_SUBTASK_END_TIMESTAMP]);
-        if (start && end && end > start) {
-          const aht = (end.getTime() - start.getTime()) - (pauseMap.get(caseId) || 0);
-          if (aht > 0) { sums.onboardingDoneAHTMillis += aht; counts.onboardingDoneAHT++; }
-        }
+
+      function createOrUpdateChart(canvasId, type, chartData, customOptions = {}) { 
+          const canvas = document.getElementById(canvasId);
+          if (!canvas) { return; }
+          const ctx = canvas.getContext('2d'); 
+          if (chartInstances[canvasId]) chartInstances[canvasId].destroy(); 
+          const defaultOptions = { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: type === 'doughnut' ? 'right' : 'top', labels: { color: '#111827', boxWidth: 12, padding: 20 } }, title: { display: false } }, scales: (type === 'bar' || type === 'line') ? { y: { beginAtZero: true, ticks: { color: '#4b5563' }, grid: { color: '#e5e7eb' } }, x: { ticks: { color: '#4b5563' }, grid: { color: 'rgba(0,0,0,0)' } } } : {} }; const finalOptions = deepMerge(defaultOptions, customOptions); chartInstances[canvasId] = new Chart(ctx, { type: type, data: chartData, options: finalOptions }); 
       }
-      tasksToProcess.forEach(task => {
-        const taskType = (task[COL_SUBTASK_TASK_TYPE] || "").toString().trim();
-        if (!taskType) return;
-        if (!taskTypeChartAggregates[taskType]) taskTypeChartAggregates[taskType] = { tatMillis: 0, tatCount: 0, ahtMillis: 0, ahtCount: 0, escCount: 0, nonEscCount: 0 };
-        const agg = taskTypeChartAggregates[taskType];
-        const start = assistantParseDateString(task[COL_SUBTASK_START_TIMESTAMP]);
-        const end = assistantParseDateString(task[COL_SUBTASK_END_TIMESTAMP]);
-        if (start && end && end > start) {
-          const rawDuration = end.getTime() - start.getTime();
-          const pauseDuration = pauseMap.get(caseId) || 0;
-          const escalationDuration = ahtEscalationOverlapMap.get(`${caseId}-${taskType}`) || 0;
-          const aht = rawDuration - pauseDuration;
-          const specificAht = rawDuration - pauseDuration - escalationDuration;
-          agg.tatMillis += rawDuration; agg.tatCount++;
-          if (aht > 0) { agg.ahtMillis += aht; agg.ahtCount++; }
-          if (caseData.isEscalated) agg.escCount++; else agg.nonEscCount++;
-
-          const isEscalated = allEscalatedCaseIds.has(caseId);
-
-          if (specificAht > 0) {
-              const typeConfig = {
-                  // ✅ 2. "Onboarding Qualify" IS REMOVED FROM THIS LIST
-                  "Post OBQ": { base: 'postObq', kpiFilter: 'avgPostObqAHTMins', withEscFilter: 'postObqAHTMinsWithEscalations', withoutEscFilter: 'postObqAHTMinsWithoutEscalations' },
-                  "Asset Delivery": { base: 'assetDelivery', kpiFilter: 'avgAssetDeliveryAHTMins', withEscFilter: 'assetDeliveryAHTMinsWithEscalations', withoutEscFilter: 'assetDeliveryAHTMinsWithoutEscalations' },
-                  "Integration": { base: 'integration', kpiFilter: 'avgIntegrationAHTMins', withEscFilter: 'integrationAHTMinsWithEscalations', withoutEscFilter: 'integrationAHTMinsWithoutEscalations' },
-                  "Menu Creation": { base: 'menuCreation', kpiFilter: 'avgMenuCreationAHTMins', withEscFilter: 'menuCreationAHTMinsWithEscalations', withoutEscFilter: 'menuCreationAHTMinsWithoutEscalations' },
-                  "Admin Creation": { base: 'adminCreation', kpiFilter: 'avgAdminCreationAHTMins', withEscFilter: 'adminCreationAHTMinsWithEscalations', withoutEscFilter: 'adminCreationAHTMinsWithoutEscalations' }
-              };
-              
-              const config = typeConfig[taskType];
-              if (config) {
-                  sums[`${config.base}AHTMillis`] += specificAht;
-                  counts[`${config.base}AHT`]++;
-                  if (kpiFilter === config.kpiFilter) tempCaseIds.add(caseId);
-                  
-                  if (isEscalated) {
-                      sums[`${config.base}AHTWithEscMillis`] += specificAht;
-                      counts[`${config.base}AHTWithEsc`]++;
-                      if (kpiFilter === config.withEscFilter) tempCaseIds.add(caseId);
-                  } else {
-                      sums[`${config.base}AHTWithoutEscMillis`] += specificAht;
-                      counts[`${config.base}AHTWithoutEsc`]++;
-                      if (kpiFilter === config.withoutEscFilter) tempCaseIds.add(caseId);
-                  }
-              }
+      
+      function renderTable() {
+          const tableData = allData.tableData || [];
+          const searchTerm = tableSearch.value.toLowerCase();
+          let filteredData = tableData.filter(row => 
+              Object.values(row).some(value => String(value).toLowerCase().includes(searchTerm))
+          );
+          mainTableBody.innerHTML = '';
+          if (filteredData.length === 0) {
+              mainTableBody.innerHTML = '<tr><td colspan="8" style="text-align:center;">No matching cases found.</td></tr>';
+              return;
           }
-          
-          if (taskType === "Integration") { sums.integrationTATMillis += rawDuration; counts.integrationTAT++; if(kpiFilter === 'avgIntegrationTAT') tempCaseIds.add(caseId); }
-          if (taskType === "Asset Delivery") {
-            const assetDeliveryDate = assistantParseDateString(task[COL_SUBTASK_ASSET_DELIVERY_DATE]);
-            if (assetDeliveryDate && assetDeliveryDate > start) { sums.assetDeliveryTATMillis += (assetDeliveryDate.getTime() - start.getTime()); counts.assetDeliveryTAT++; if(kpiFilter === 'avgAssetDeliveryTAT') tempCaseIds.add(caseId); }
-            const assetTriggerDate = assistantParseDateString(task[COL_SUBTASK_ASSET_TRIGGER_DATE]);
-            if(assetTriggerDate && assetTriggerDate > start) { sums.assetTriggeredAHTMillis += (assetTriggerDate.getTime() - start.getTime()); counts.assetTriggeredAHT++; if(kpiFilter === 'avgAssetTriggeredAHTMins') tempCaseIds.add(caseId); }
-          }
-        }
-      });
-    });
+          const rowsHtml = filteredData.map(row => ` <tr class="clickable-row" data-case-id="${row.caseId}"> <td>${row.caseId || ''}</td> <td>${row.market || ''}</td> <td>${row.agent || ''}</td> <td>${row.status || ''}</td> <td>${formatDate(row.created)}</td> <td>${formatDate(row.endTimestamp)}</td> <td>${row.isEscalated ? 'Yes' : 'No'}</td> <td>${row.taskType || 'N/A'}</td> </tr> <tr class="detail-row" id="detail-${row.caseId}"> <td colspan="8"><div class="detail-content-wrapper">Loading...</div></td> </tr> `).join('');
+          mainTableBody.innerHTML = rowsHtml;
+      }
+      
+      function handleTableClick(event) { const clickedRow = event.target.closest('.clickable-row'); if (!clickedRow) return; const caseId = clickedRow.dataset.caseId; const detailRow = document.getElementById(`detail-${caseId}`); document.querySelectorAll('.detail-row').forEach(row => { if (row !== detailRow) { row.style.display = 'none'; row.previousElementSibling.classList.remove('active'); } }); if (detailRow.style.display === 'table-row') { detailRow.style.display = 'none'; clickedRow.classList.remove('active'); } else { detailRow.style.display = 'table-row'; clickedRow.classList.add('active'); fetchCaseDetails(caseId); } }
+      function fetchCaseDetails(caseId) { const detailWrapper = document.querySelector(`#detail-${caseId} .detail-content-wrapper`); detailWrapper.innerHTML = 'Loading...'; google.script.run .withSuccessHandler((details) => { if (details.error) { detailWrapper.innerHTML = `<p style="color: var(--negative-color);">${details.error}</p>`; return; } detailWrapper.innerHTML = buildDetailHtml(details); }) .withFailureHandler((err) => { detailWrapper.innerHTML = `<p style="color: var(--negative-color);">Failed to load details: ${err.message}</p>`; }) .getCaseDetailsFromCSV(caseId); }
+      function buildDetailHtml(details) { const tasksHtml = details.tasks.length > 0 ? details.tasks.map(t => ` <div class="detail-item"> <strong>${t.taskType || 'N/A'} (${t.status || 'N/A'})</strong> <span>Start: ${formatDateTime(t.start)}</span> <span>End: ${formatDateTime(t.end)}</span> ${t.obqReasons ? `<span>OBQ Reasons: ${t.obqReasons}</span>` : ''} ${t.comments ? `<span>Comments: ${t.comments}</span>` : ''} </div> `).join('') : '<p class="no-details">No task data.</p>'; const escalationsHtml = details.escalations.length > 0 ? details.escalations.map(e => ` <div class="detail-item"> <strong>Escalation (${e.taskType || 'N/A'})</strong> <span>Start: ${formatDateTime(e.start)}</span> <span>End: ${formatDateTime(e.end)}</span> ${e.reason ? `<span>Reason: ${e.reason}</span>` : ''} </div> `).join('') : '<p class="no-details">No escalations.</p>'; const pausesHtml = details.pauses.length > 0 ? details.pauses.map(p => ` <div class="detail-item"> <strong>Pause Log</strong> <span>Start: ${formatDateTime(p.start)}</span> <span>End: ${formatDateTime(p.end)}</span> </div> `).join('') : '<p class="no-details">No pauses.</p>'; return ` <div class="detail-content"> <div class="detail-section"><h4>Tasks</h4>${tasksHtml}</div> <div class="detail-section"><h4>Escalations</h4>${escalationsHtml}</div> <div class="detail-section"><h4>Pauses</h4>${pausesHtml}</div> </div> `; }
+      
+      function openModal() { reportModal.style.display = 'flex'; }
+      function closeModal() { reportModal.style.display = 'none'; modalBody.innerHTML = ''; }
+      function buildReportHtml(reportData) { let html = ''; reportData.log.forEach(step => { html += ` <div class="log-step"> <h4>${step.title}</h4> <p class="log-summary">${step.summary}</p> ${step.details && step.details.length > 0 ? ` <div class="log-details"> <p><strong>Details:</strong></p> ${step.details.map(d => `<p>${d}</p>`).join('')} </div> ` : ''} </div> `; }); return html; }
+      
+      function showLoading() { loadingOverlay.classList.remove('hidden'); }
+      function hideLoading() { loadingOverlay.classList.add('hidden'); }
+      function formatDate(d) { return d ? new Date(d).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}) : 'N/A'; }
+      function formatDateTime(d) { return d ? new Date(d).toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : 'N/A'; }
+      function deepMerge(t, s) { for (const k in s) { if (s[k] instanceof Object && k in t) Object.assign(s[k], deepMerge(t[k], s[k])); } Object.assign(t || {}, s); return t; }
 
-    const adhocTaskTypes = ["Post OBQ", "Adhoc-Process", "Adhoc-Admin"];
-    subTaskData.forEach(row => {
-        const taskType = (row[COL_SUBTASK_TASK_TYPE] || "").toString().trim();
-        if (adhocTaskTypes.includes(taskType)) {
-            const tag = (row[COL_SUBTASK_POST_OBQ_TAGS] || "Untagged").toString().trim();
-            if (tag) adhocCounts[tag] = (adhocCounts[tag] || 0) + 1;
-        }
-    });
+      function handleRunReport() {
+            runReportButton.textContent = 'Generating...';
+            runReportButton.disabled = true;
+            reportLinksContainer.innerHTML = '<p style="color: var(--text-secondary); font-size: 13px;">Report generation has started. This may take several minutes...</p>';
 
-    kpis.integrationPendingCases = counts.integrationPending;
-    kpis.avgAssetTriggeredAHTMins = counts.assetTriggeredAHT > 0 ? (sums.assetTriggeredAHTMillis / counts.assetTriggeredAHT / 60000).toFixed(2) : "0.00";
-    kpis.avgOnboardingDoneTAT = completedCasesInFilter.size > 0 ? ((counts.casesMetSLA / completedCasesInFilter.size) * 100).toFixed(1) + "%" : "N/A";
-    kpis.onboardingDoneAHTDays = counts.onboardingDoneAHT > 0 ? (sums.onboardingDoneAHTMillis / counts.onboardingDoneAHT / 86400000).toFixed(2) : "0.00";
-    kpis.avgIntegrationTAT = counts.integrationTAT > 0 ? (sums.integrationTATMillis / counts.integrationTAT / 86400000).toFixed(2) : "0.00";
-    kpis.avgAssetDeliveryTAT = counts.assetDeliveryTAT > 0 ? (sums.assetDeliveryTATMillis / counts.assetDeliveryTAT / 86400000).toFixed(2) : "0.00";
-    kpis.totalCasesWithIntegration = integrationCaseIds.size;
-    
-    // The old loop no longer calculates "obq", so we remove it from the list
-    const ahtKpiTypes = ["postObq", "assetDelivery", "integration", "menuCreation", "adminCreation"];
-    ahtKpiTypes.forEach(type => {
-        const capitalizedType = type.charAt(0).toUpperCase() + type.slice(1);
-        kpis[`avg${capitalizedType}AHTMins`] = counts[`${type}AHT`] > 0 ? (sums[`${type}AHTMillis`] / counts[`${type}AHT`] / 60000).toFixed(2) : "0.00";
-        kpis[`${type}AHTMinsWithEscalations`] = counts[`${type}AHTWithEsc`] > 0 ? (sums[`${type}AHTWithEscMillis`] / counts[`${type}AHTWithEsc`] / 60000).toFixed(2) : "0.00";
-        kpis[`${type}AHTMinsWithoutEscalations`] = counts[`${type}AHTWithoutEsc`] > 0 ? (sums[`${type}AHTWithoutEscMillis`] / counts[`${type}AHTWithoutEsc`] / 60000).toFixed(2) : "0.00";
-    });
-
-    // ✅ 3. MERGE THE RESULTS FROM THE NEW FUNCTION
-    kpis.avgObqAHTMins = obqAhtResults.avgObqAHTMins;
-    kpis.obqAHTMinsWithEscalations = obqAhtResults.obqAHTMinsWithEscalations;
-    kpis.obqAHTMinsWithoutEscalations = obqAhtResults.obqAHTMinsWithoutEscalations;
-    
-    const uniqueMarkets = new Set(allSubTaskValues.map(r => (r[COL_SUBTASK_MARKET] || "").toString().trim()).filter(Boolean));
-    const uniqueTaskTypes = new Set(allSubTaskValues.map(r => (r[COL_SUBTASK_TASK_TYPE] || "").toString().trim()).filter(Boolean));
-    const dropdownOptions = { markets: Array.from(uniqueMarkets).sort(), taskTypes: Array.from(uniqueTaskTypes).sort() };
-    
-    let tableCaseIds;
-    // Handle the table drill-down for the new OBQ KPI
-    const obqKpiFilters = ['avgOnboardingQualifyAHTMins', 'obqAHTMinsWithEscalations', 'obqAHTMinsWithoutEscalations'];
-    if (obqKpiFilters.includes(kpiFilter)) {
-      tableCaseIds = obqAhtResults.caseIdsForTable;
-    } 
-    else if (kpiFilter === 'totalCases') tableCaseIds = completedCasesInFilter;
-    else if (kpiFilter === 'inProgressTotalCases') tableCaseIds = inProgressCaseIds;
-    else if (kpiFilter === 'totalHandledCases') tableCaseIds = handledCaseIds;
-    else if (kpiFilter === 'casesWithEscalations') tableCaseIds = escalatedCasesInFilter;
-    else if (kpiFilter === 'casesWithoutEscalations') tableCaseIds = new Set([...handledCaseIds].filter(id => !escalatedCasesInFilter.has(id)));
-    else if (kpiFilter === 'integrationPendingCases') tableCaseIds = new Set(Array.from(cases.keys()).filter(id => cases.get(id).tasks.some(t => (t[COL_SUBTASK_TASK_TYPE] || "").toString().trim() === "Integration" && !t[COL_SUBTASK_END_TIMESTAMP])));
-    else if (kpiFilter === 'totalCasesWithIntegration') tableCaseIds = integrationCaseIds;
-    else if (kpiFilter === 'avgEscalatedTimeMins') tableCaseIds = caseIdsForAvgEscTime;
-    else if (kpiFilter) tableCaseIds = tempCaseIds;
-    else tableCaseIds = new Set(cases.keys());
-    
-    const tableData = [];
-    tableCaseIds.forEach(caseId => {
-        const dataSource = (kpiFilter && kpiFilter !== 'totalCases') ? allCases : cases;
-        if (dataSource.has(caseId)) {
-            const caseData = dataSource.get(caseId);
-            
-            let specificTask = null;
-            if (kpiFilter === 'totalHandledCases' || kpiFilter === 'casesWithEscalations' || kpiFilter === 'casesWithoutEscalations' || kpiFilter === 'inProgressTotalCases' || kpiFilter === 'avgEscalatedTimeMins') {
-                specificTask = handledTasksMap.get(caseId);
-            } else if (obqKpiFilters.includes(kpiFilter)) {
-                specificTask = (matchingTasksMap.get(caseId) || [null])[0]; // For OBQ, get the first matching task
-            } else if (kpiFilter && kpiFilter.includes('AHT')) {
-                specificTask = caseData.tasks.find(t => (tempCaseIds.has(caseId))) || handledTasksMap.get(caseId);
-            }
-             else if (filters.taskType) {
-                 specificTask = (matchingTasksMap.get(caseId) || [null])[0];
-            }
-
-            const createdDate = specificTask ? assistantParseDateString(specificTask[COL_SUBTASK_START_TIMESTAMP]) : caseData.earliestStartDate;
-            const endDate = specificTask ? assistantParseDateString(specificTask[COL_SUBTASK_END_TIMESTAMP]) : caseData.latestEndDate;
-            const taskTypeDisplay = specificTask ? specificTask[COL_SUBTASK_TASK_TYPE] : findMainTaskType(caseData.tasks);
-            const statusDisplay = caseData.status || (endDate ? 'Completed' : 'In Progress');
-
-            tableData.push({
-                caseId: caseId,
-                market: caseData.market,
-                agent: caseData.agent,
-                status: statusDisplay,
-                created: createdDate ? createdDate.toISOString() : null,
-                endTimestamp: endDate ? endDate.toISOString() : null,
-                isEscalated: allEscalatedCaseIds.has(caseId),
-                taskType: taskTypeDisplay
-            });
-        }
-    });
-    
-    const chartData = {};
-    Object.keys(taskTypeChartAggregates).forEach(taskType => {
-        const agg = taskTypeChartAggregates[taskType];
-        chartData[taskType] = {
-            avgTatHours: agg.tatCount > 0 ? (agg.tatMillis / agg.tatCount / 3600000) : 0,
-            avgTatDays: agg.tatCount > 0 ? (agg.tatMillis / agg.tatCount / 86400000) : 0,
-            avgAhtMins: agg.ahtCount > 0 ? (agg.ahtMillis / agg.ahtCount / 60000) : 0,
-            escCount: agg.escCount,
-            nonEscCount: agg.nonEscCount
-        };
-    });
-
-    return {
-      kpis: kpis, dropdownOptions: dropdownOptions, tableData: tableData,
-      chartData: chartData, adhocCounts: adhocCounts,
-      lastRefreshed: new Date().toLocaleString(undefined, { timeZone: Session.getScriptTimeZone() }),
-      error: null
-    };
-  } catch (error) {
-    Logger.log("CRITICAL Error in getDashboardData: " + error.toString() + " Stack: " + error.stack);
-    return { error: "Major error calculating dashboard data: " + error.message };
-  }
-}
-
-// =================================================================================== //
-// ==========            HELPER FUNCTIONS                          ====================== //
-// =================================================================================== //
-
-function filterCases_(allCases, filters) {
-    const { startDate, endDate, market, taskType } = filters;
-    const filteredCases = new Map();
-    const matchingTasksMap = new Map();
-
-    const filterStartDate = startDate ? assistantParseDateDashed(startDate) : null;
-    const filterEndDate = endDate ? assistantParseDateDashed(endDate) : null;
-    if (filterStartDate) filterStartDate.setHours(0, 0, 0, 0);
-    if (filterEndDate) filterEndDate.setHours(23, 59, 59, 999);
-
-    allCases.forEach((caseData, caseId) => {
-        if (market && (caseData.market || "").toString().trim() !== market) {
-            return;
-        }
-        const caseMatchingTasks = [];
-        for (const task of caseData.tasks) {
-            const currentTaskType = (task[COL_SUBTASK_TASK_TYPE] || "").toString().trim();
-            if (taskType && currentTaskType !== taskType) {
-                continue;
-            }
-            const taskStart = assistantParseDateString(task[COL_SUBTASK_START_TIMESTAMP]);
-            const taskEnd = assistantParseDateString(task[COL_SUBTASK_END_TIMESTAMP]);
-            
-            // ✅ Corrected & Final Logic: Strict "Contained Within" Filter
-            let isDateMatch = false; // Default to not matching
-
-            // A task must have a start and end date to be considered.
-            if (taskStart && taskEnd) {
-                // Check if the task's start date is on or after the filter's start date.
-                const startedAfterFilterStart = !filterStartDate || taskStart >= filterStartDate;
-                
-                // Check if the task's end date is on or before the filter's end date.
-                const endedBeforeFilterEnd = !filterEndDate || taskEnd <= filterEndDate;
-        
-                // A task is only a match if BOTH conditions are true.
-                if (startedAfterFilterStart && endedBeforeFilterEnd) {
-                    isDateMatch = true;
-                }
-            }
-
-            if (isDateMatch) {
-                caseMatchingTasks.push(task);
-            }
-        }
-        if (caseMatchingTasks.length > 0) {
-            filteredCases.set(caseId, caseData);
-            matchingTasksMap.set(caseId, caseMatchingTasks);
-        }
-    });
-
-    return { filteredCases, matchingTasksMap };
-}
-
-function assistantParseDateDashed(dateStr) {
-    if (!dateStr || typeof dateStr !== 'string') return null;
-    const parts = dateStr.split('-');
-    if (parts.length === 3) {
-        const d = new Date(parts[0], parseInt(parts[1], 10) - 1, parts[2]);
-        if (!isNaN(d.getTime())) {
-            return d;
-        }
-    }
-    return assistantParseDateString(dateStr);
-}
-
-function assistantParseDateString(dateStr) {
-  if (!dateStr) return null;
-  if (dateStr instanceof Date && !isNaN(dateStr.getTime())) return dateStr;
-  if (typeof dateStr !== 'string') return null;
-  dateStr = dateStr.trim();
-  if (dateStr === "") return null;
-  const dAttempt = new Date(dateStr);
-  if (!isNaN(dAttempt.getTime())) return dAttempt;
-  if (!isNaN(parseFloat(dateStr)) && isFinite(dateStr)) {
-    const numVal = parseFloat(dateStr);
-    if (numVal > 20000 && numVal < 70000) {
-      try {
-        const excelEpoch = new Date(Date.UTC(1899, 11, 30));
-        const jsDate = new Date(excelEpoch.getTime() + numVal * 24 * 60 * 60 * 1000);
-        if (!isNaN(jsDate.getTime())) return jsDate;
-      } catch (ex) {}
-    }
-  }
-  return null;
-}
-
-function findMainTaskType(tasks) {
-    const taskTypes = new Set(tasks.map(t => (t[COL_SUBTASK_TASK_TYPE] || "").toString().trim()));
-    if (taskTypes.has("Integration")) return "Integration";
-    if (taskTypes.has("Asset Delivery")) return "Asset Delivery";
-    if (taskTypes.has("Menu Creation")) return "Menu Creation";
-    return Array.from(taskTypes)[0] || "N/A";
-}
-
-
-function getKpiCalculationReport(filters, kpiId) {
-    try {
-        const log = [];
-        const ss = SpreadsheetApp.getActiveSpreadsheet();
-        const sheetSubTask = ss.getSheetByName(SHEET_NAME_SUB_TASK);
-        if (!sheetSubTask) throw new Error(`Sheet "${SHEET_NAME_SUB_TASK}" not found.`);
-
-        const allSubTaskValues = sheetSubTask.getDataRange().getValues();
-        allSubTaskValues.shift();
-        
-        log.push({
-            title: "Step 1: Initial Data Load & Grouping",
-            summary: `Loaded ${allSubTaskValues.length} task rows and grouped them into ${new Set(allSubTaskValues.map(r=>r[COL_SUBTASK_CASE_ID])).size} cases.`
-        });
-
-        const allCases = new Map();
-        allSubTaskValues.forEach(row => {
-            const caseId = (row[COL_SUBTASK_CASE_ID] || "").toString().trim();
-            if (!caseId) return;
-            if (!allCases.has(caseId)) {
-                allCases.set(caseId, { tasks: [], market: row[COL_SUBTASK_MARKET]});
-            }
-            allCases.get(caseId).tasks.push(row);
-        });
-        
-        const filterStartDate = filters.startDate ? assistantParseDateDashed(filters.startDate) : null;
-        const filterEndDate = filters.endDate ? assistantParseDateDashed(filters.endDate) : null;
-        if (filterStartDate) filterStartDate.setHours(0, 0, 0, 0);
-        if (filterEndDate) filterEndDate.setHours(23, 59, 59, 999);
-        
-        const ahtKpiRegex = /^(avg|.*AHTMins)/;
-        if (ahtKpiRegex.test(kpiId) && !kpiId.includes('avgEscalatedTime')) {
-             log.push({
-                title: "Step 2: Logic for AHT Calculation",
-                summary: `This KPI calculates an Average Handling Time. It finds all relevant tasks and calculates their duration (End Timestamp - Start Timestamp). It then subtracts any pause time, and crucially, subtracts only the portion of any escalation that actually overlapped with the task's active work time.`
-            });
-             log.push({
-                title: "Step 3: Final Calculation",
-                summary: `The final number is the average of these calculated durations in minutes. The 'w/ Escalations' and 'w/o Escalations' versions further filter this group based on whether the case appears in the Escalation Logs.`
-            });
-             return { log, error: null };
-        }
-        
-        switch (kpiId) {
-            case 'totalHandledCases':
-            case 'casesWithEscalations':
-            case 'casesWithoutEscalations':
-            case 'avgEscalatedTimeMins':
-                {
-                    const handledCaseIds = new Set();
-                    allCases.forEach((caseData, caseId) => {
-                        if (filters.market && caseData.market !== filters.market) return;
-                        for (const task of caseData.tasks) {
-                            if (filters.taskType && (task[COL_SUBTASK_TASK_TYPE] || "").toString().trim() !== filters.taskType) continue;
-                            const taskStart = assistantParseDateString(task[COL_SUBTASK_START_TIMESTAMP]);
-                            if ((filterStartDate && taskStart >= filterStartDate && taskStart <= filterEndDate) || (!filterStartDate && taskStart)) {
-                                handledCaseIds.add(caseId);
-                                break;
-                            }
-                        }
-                    });
-                    log.push({
-                        title: "Step 2: Identify 'Handled Cases'",
-                        summary: `First, identify all cases that started within the date range (respecting market/task filters), ignoring their end date. This resulted in ${handledCaseIds.size} 'handled cases' to be analyzed.`
-                    });
+            google.script.run
+                .withSuccessHandler(response => {
+                    runReportButton.textContent = 'Run Monthly Report Generator';
+                    runReportButton.disabled = false;
                     
-                    const escalationData = ss.getSheetByName(SHEET_NAME_ESCALATION_LOGS).getDataRange().getValues();
-                    escalationData.shift();
-                    let relevantEscalationData = escalationData;
-                    if(filters.taskType) {
-                        relevantEscalationData = escalationData.filter(row => (row[COL_LOGS_TASK_TYPE] || "").toString().trim() === filters.taskType);
-                    }
-                    const allEscalatedCaseIds = new Set(relevantEscalationData.map(row => (row[COL_LOGS_RELATED_CASE_ID] || "").toString().trim()));
-                    const escalatedInFilter = new Set([...handledCaseIds].filter(id => allEscalatedCaseIds.has(id)));
-                    
-                    if (kpiId.includes('Escalation')) {
-                         log.push({
-                            title: "Step 3: Check Against Escalation Logs",
-                            summary: `Of the ${handledCaseIds.size} handled cases, checked which ones have a relevant entry in the '${SHEET_NAME_ESCALATION_LOGS}'. Found ${escalatedInFilter.size} escalated cases.`
-                        });
-                    }
+                    if (response.success) {
+                        reportLinksContainer.innerHTML = ''; // Clear the 'generating' message
 
-                    if (kpiId === 'casesWithoutEscalations') {
-                        log.push({
-                            title: "Step 4: Final Calculation",
-                            summary: `Subtracted the escalated cases from the total handled cases (${handledCaseIds.size} - ${escalatedInFilter.size}). The result is ${handledCaseIds.size - escalatedInFilter.size}.`
-                        });
-                    }
-                    if (kpiId === 'avgEscalatedTimeMins') {
-                        const caseIdsForAvgEscTime = new Set();
-                        relevantEscalationData.forEach(eRow => {
-                            const caseId = (eRow[COL_LOGS_RELATED_CASE_ID] || "").toString().trim();
-                            if (handledCaseIds.has(caseId)) {
-                                const start = assistantParseDateString(eRow[COL_LOGS_START_TIME]);
-                                const end = assistantParseDateString(eRow[COL_LOGS_END_TIME]);
-                                if (!start || !end) return;
-                                if (filterEndDate && end > filterEndDate) return;
-                                caseIdsForAvgEscTime.add(caseId);
-                            }
-                        });
-                        log.push({
-                            title: "Step 4: Filter Escalations for Averaging",
-                            summary: `From the list of escalated cases, a second filter is applied. Only escalations that are completed (have an end date) and ended before the filter's End Date are included in the average. This resulted in ${caseIdsForAvgEscTime.size} cases with valid escalations.`
-                        });
-                         log.push({
-                            title: "Step 5: Final Calculation",
-                            summary: `The final KPI is the average duration of only these specific, valid escalations.`
-                        });
-                    }
-                }
-                break;
+                        const p = document.createElement('p');
+                        p.textContent = 'Reports generated successfully!';
+                        p.style.fontWeight = 'bold';
+                        reportLinksContainer.appendChild(p);
 
-            case 'inProgressTotalCases': {
-                const inProgressCaseIds = new Set();
-                allCases.forEach((caseData, caseId) => {
-                    if (filters.market && caseData.market !== filters.market) return;
-                    for (const task of caseData.tasks) {
-                         if (filters.taskType && (task[COL_SUBTASK_TASK_TYPE] || "").toString().trim() !== filters.taskType) continue;
-                        const taskStart = assistantParseDateString(task[COL_SUBTASK_START_TIMESTAMP]);
-                        const taskEnd = assistantParseDateString(task[COL_SUBTASK_END_TIMESTAMP]);
-                        let isConsideredInProgress = false;
-                        if (filterStartDate && filterEndDate) {
-                            if (taskStart && taskStart >= filterStartDate && taskStart <= filterEndDate && (!taskEnd || taskEnd > filterEndDate)) {
-                                isConsideredInProgress = true;
-                            }
-                        } else if (!filterStartDate && !filterEndDate && !taskEnd) {
-                           isConsideredInProgress = true;
+                        const reportLink = document.createElement('a');
+                        reportLink.href = response.reportUrl;
+                        reportLink.textContent = 'View Main Performance Report';
+                        reportLink.target = '_blank';
+                        reportLinksContainer.appendChild(reportLink);
+
+                        if (response.quarantineUrl) {
+                            const quarantineLink = document.createElement('a');
+                            quarantineLink.href = response.quarantineUrl;
+                            quarantineLink.textContent = 'View Quarantine Analysis Sheet';
+                            quarantineLink.target = '_blank';
+                            reportLinksContainer.appendChild(quarantineLink);
                         }
-                        if (isConsideredInProgress) {
-                            inProgressCaseIds.add(caseId);
-                            break;
-                        }
+
+                    } else {
+                        reportLinksContainer.innerHTML = `<p style="color: var(--negative-color);">${response.message || 'An unknown error occurred.'}</p>`;
                     }
-                });
-                log.push({
-                    title: "Step 2: Logic for 'In-Progress Cases'",
-                    summary: `Searched all tasks for cases that either started in the date range and ended after it, or (if no date range is set) have no end date at all. Found ${inProgressCaseIds.size} matching cases.`
-                });
-                break;
-            }
-
-            default: {
-                 const { filteredCases } = filterCases_(allCases, filters);
-                 log.push({
-                    title: "Step 2: Applying Standard Filters",
-                    summary: `Applied standard filters (task must start AND end within the date range). This resulted in ${filteredCases.size} cases to be used for this KPI's calculation.`
-                });
-                 break;
-            }
+                })
+                .withFailureHandler(err => {
+                    reportLinksContainer.innerHTML = `<p style="color: var(--negative-color);">A critical error occurred: ${err.message}</p>`;
+                    runReportButton.textContent = 'Run Monthly Report Generator';
+                    runReportButton.disabled = false;
+                })
+                .runReportGenerator();
         }
-
-        return { log: log, error: null };
-    } catch (e) {
-        Logger.log(`CRITICAL Error in getKpiCalculationReport: ${e.toString()}`);
-        return { error: `Error generating report: ${e.message}` };
-    }
-}
-
-
-
-
-
-
-function debugObqAHTCalculation() {
-  Logger.log("========= STARTING OBQ AHT DEBUG LOG ==========");
-
-  // --- CONFIGURE YOUR FILTERS HERE ---
-  // Filters are pre-set as requested.
-  const filters = {
-    startDate: "2025-08-11",
-    endDate: "2025-08-22",
-    market: null,
-    taskType: "Onboarding Qualify"
-  };
-  Logger.log(`Running with filters: ${JSON.stringify(filters)}`);
-  // ------------------------------------
-
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheetSubTask = ss.getSheetByName(SHEET_NAME_SUB_TASK);
-    const sheetEscalation = ss.getSheetByName(SHEET_NAME_ESCALATION_LOGS);
-    const sheetPause = ss.getSheetByName(SHEET_NAME_PAUSE_LOGS);
-
-    const allSubTaskValues = sheetSubTask.getDataRange().getValues();
-    allSubTaskValues.shift();
-    let escalationData = sheetEscalation ? sheetEscalation.getDataRange().getValues() : [[]];
-    escalationData.shift();
-    let pauseData = sheetPause ? sheetPause.getDataRange().getValues() : [[]];
-    pauseData.shift();
-
-    const allCases = new Map();
-    allSubTaskValues.forEach(row => {
-      const caseId = (row[COL_SUBTASK_CASE_ID] || "").toString().trim();
-      if (!caseId) return;
-      if (!allCases.has(caseId)) {
-        allCases.set(caseId, { tasks: [], market: row[COL_SUBTASK_MARKET] });
-      }
-      allCases.get(caseId).tasks.push(row);
-    });
-
-    const { filteredCases, matchingTasksMap } = filterCases_(allCases, filters);
-    const cases = filteredCases;
-    Logger.log(`Found ${cases.size} cases that match the initial filters.`);
-    if (cases.size === 0) {
-      Logger.log("No cases found. Check your filters or the filterCases_ function logic.");
-      Logger.log("========= END OF DEBUG LOG ==========");
-      return;
-    }
-
-    // Pre-calculate Pause and Escalation data for efficiency
-    const pauseMap = new Map();
-    pauseData.forEach(pRow => {
-      const caseId = (pRow[COL_LOGS_RELATED_CASE_ID] || "").toString().trim();
-      const start = assistantParseDateString(pRow[COL_LOGS_START_TIME]);
-      const end = assistantParseDateString(pRow[COL_LOGS_END_TIME]);
-      if (caseId && start && end && end > start) {
-        pauseMap.set(caseId, (pauseMap.get(caseId) || 0) + (end.getTime() - start.getTime()));
-      }
-    });
-
-    const ahtEscalationOverlapMap = new Map();
-    escalationData.forEach(eRow => {
-        const caseId = (eRow[COL_LOGS_RELATED_CASE_ID] || "").toString().trim();
-        const taskType = (eRow[COL_LOGS_TASK_TYPE] || "").toString().trim();
-        const key = `${caseId}-${taskType}`;
-        const task = (matchingTasksMap.get(caseId) || []).find(t => (t[COL_SUBTASK_TASK_TYPE] || "").toString().trim() === taskType);
-        if (task) {
-            const taskStart = assistantParseDateString(task[COL_SUBTASK_START_TIMESTAMP]);
-            const taskEnd = assistantParseDateString(task[COL_SUBTASK_END_TIMESTAMP]);
-            const escStart = assistantParseDateString(eRow[COL_LOGS_START_TIME]);
-            const escEnd = assistantParseDateString(eRow[COL_LOGS_END_TIME]);
-            if (taskStart && taskEnd && escStart && escEnd) {
-                const overlapStart = Math.max(taskStart.getTime(), escStart.getTime());
-                const overlapEnd = Math.min(taskEnd.getTime(), escEnd.getTime());
-                const duration = overlapEnd - overlapStart;
-                if (duration > 0) {
-                    ahtEscalationOverlapMap.set(key, (ahtEscalationOverlapMap.get(key) || 0) + duration);
-                }
-            }
-        }
-    });
-
-    // Re-run the calculation with detailed logging
-    let sumMillis = 0;
-    let count = 0;
-
-    cases.forEach((caseData, caseId) => {
-      const tasksToProcess = matchingTasksMap.get(caseId) || [];
-      tasksToProcess.forEach(task => {
-        const taskType = (task[COL_SUBTASK_TASK_TYPE] || "").toString().trim();
-        if (taskType !== "Onboarding Qualify") return;
-
-        Logger.log(`\n--- Processing Case ID: ${caseId} ---`);
-        const start = assistantParseDateString(task[COL_SUBTASK_START_TIMESTAMP]);
-        const end = assistantParseDateString(task[COL_SUBTASK_END_TIMESTAMP]);
-        
-        if (!start || !end || end < start) {
-          Logger.log(`SKIPPED: Invalid or missing start/end timestamps.`);
-          return;
-        }
-
-        const rawDuration = end.getTime() - start.getTime();
-        const pauseDuration = pauseMap.get(caseId) || 0;
-        const escalationDuration = ahtEscalationOverlapMap.get(`${caseId}-${taskType}`) || 0;
-        const specificAht = rawDuration - pauseDuration - escalationDuration;
-
-        Logger.log(`  Start Time: ${start.toLocaleString()}`);
-        Logger.log(`  End Time:   ${end.toLocaleString()}`);
-        Logger.log(`  (A) Raw Duration: ........ ${rawDuration / 60000} mins`);
-        Logger.log(`  (B) Pause Time: .......... - ${pauseDuration / 60000} mins`);
-        Logger.log(`  (C) Escalation Overlap: .. - ${escalationDuration / 60000} mins`);
-        Logger.log(`  -----------------------------------------`);
-        Logger.log(`  (=) Final AHT (A-B-C): ... ${specificAht / 60000} mins`);
-        
-        if (specificAht > 0) {
-          sumMillis += specificAht;
-          count++;
-          Logger.log(`  ✅ RESULT: INCLUDED in calculation. New Count: ${count}, New Total Sum (mins): ${sumMillis / 60000}`);
-        } else {
-          Logger.log(`  ❌ RESULT: SKIPPED because Final AHT is zero or negative.`);
-        }
-      });
-    });
-
-    Logger.log("\n========= FINAL CALCULATION SUMMARY =========");
-    Logger.log(`Total AHT in Milliseconds: ${sumMillis}`);
-    Logger.log(`Total Number of Cases Counted: ${count}`);
-    const finalAvg = count > 0 ? (sumMillis / count / 60000).toFixed(2) : "0.00";
-    Logger.log(`Final Average (AHT in Mins): ${finalAvg}`);
-    Logger.log("==============================================");
-
-  } catch (e) {
-    Logger.log(`CRITICAL ERROR during debug: ${e.toString()} \nStack: ${e.stack}`);
-  }
-}
-
-
-
-
-// =================================================================================== //
-// ==========     NEW ISOLATED FUNCTION FOR OBQ AHT CALCULATION     ================== //
-// =================================================================================== //
-
-function getObqAhtKpi(filters, allSubTaskValues, pauseData, escalationData) {
-  const output = {
-    avgObqAHTMins: "0.00",
-    obqAHTMinsWithEscalations: "0.00",
-    obqAHTMinsWithoutEscalations: "0.00",
-    caseIdsForTable: new Set()
-  };
-
-  try {
-    const allCases = new Map();
-    allSubTaskValues.forEach(row => {
-      const caseId = (row[COL_SUBTASK_CASE_ID] || "").toString().trim();
-      if (!caseId) return;
-      if (!allCases.has(caseId)) {
-        allCases.set(caseId, { tasks: [], market: row[COL_SUBTASK_MARKET] });
-      }
-      allCases.get(caseId).tasks.push(row);
-    });
-
-    const obqFilters = { ...filters, taskType: "Onboarding Qualify" };
-    const { filteredCases, matchingTasksMap } = filterCases_(allCases, obqFilters);
-    const cases = filteredCases;
-
-    if (cases.size === 0) {
-      return output;
-    }
-
-    const pauseMap = new Map();
-    pauseData.forEach(pRow => {
-      const caseId = (pRow[COL_LOGS_RELATED_CASE_ID] || "").toString().trim();
-      const start = assistantParseDateString(pRow[COL_LOGS_START_TIME]);
-      const end = assistantParseDateString(pRow[COL_LOGS_END_TIME]);
-      if (caseId && start && end && end > start) {
-        pauseMap.set(caseId, (pauseMap.get(caseId) || 0) + (end.getTime() - start.getTime()));
-      }
-    });
-
-    const ahtEscalationOverlapMap = new Map();
-    escalationData.forEach(eRow => {
-        const caseId = (eRow[COL_LOGS_RELATED_CASE_ID] || "").toString().trim();
-        const taskType = (eRow[COL_LOGS_TASK_TYPE] || "").toString().trim();
-        if (taskType !== "Onboarding Qualify") return;
-
-        const task = (matchingTasksMap.get(caseId) || []).find(t => (t[COL_SUBTASK_TASK_TYPE] || "").toString().trim() === taskType);
-        if (task) {
-            const taskStart = assistantParseDateString(task[COL_SUBTASK_START_TIMESTAMP]);
-            const taskEnd = assistantParseDateString(task[COL_SUBTASK_END_TIMESTAMP]);
-            const escStart = assistantParseDateString(eRow[COL_LOGS_START_TIME]);
-            const escEnd = assistantParseDateString(eRow[COL_LOGS_END_TIME]);
-            if (taskStart && taskEnd && escStart && escEnd) {
-                const overlapStart = Math.max(taskStart.getTime(), escStart.getTime());
-                const overlapEnd = Math.min(taskEnd.getTime(), escEnd.getTime());
-                const duration = overlapEnd - overlapStart;
-                if (duration > 0) {
-                    const key = `${caseId}-${taskType}`;
-                    ahtEscalationOverlapMap.set(key, (ahtEscalationOverlapMap.get(key) || 0) + duration);
-                }
-            }
-        }
-    });
-    
-    const relevantEscalationData = escalationData.filter(row => (row[COL_LOGS_TASK_TYPE] || "").toString().trim() === "Onboarding Qualify");
-    const allObqEscalatedCaseIds = new Set(relevantEscalationData.map(row => (row[COL_LOGS_RELATED_CASE_ID] || "").toString().trim()));
-
-    let sums = { obqAHTMillis: 0, obqAHTWithEscMillis: 0, obqAHTWithoutEscMillis: 0 };
-    let counts = { obqAHT: 0, obqAHTWithEsc: 0, obqAHTWithoutEsc: 0 };
-    const includedCaseIds = new Set();
-
-    cases.forEach((caseData, caseId) => {
-      const tasksToProcess = matchingTasksMap.get(caseId) || [];
-      tasksToProcess.forEach(task => {
-        const start = assistantParseDateString(task[COL_SUBTASK_START_TIMESTAMP]);
-        const end = assistantParseDateString(task[COL_SUBTASK_END_TIMESTAMP]);
-        if (!start || !end || end < start) return;
-
-        const rawDuration = end.getTime() - start.getTime();
-        const pauseDuration = pauseMap.get(caseId) || 0;
-        const escalationDuration = ahtEscalationOverlapMap.get(`${caseId}-Onboarding Qualify`) || 0;
-        const specificAht = rawDuration - pauseDuration - escalationDuration;
-        
-        if (specificAht > 0) {
-          includedCaseIds.add(caseId);
-          sums.obqAHTMillis += specificAht;
-          counts.obqAHT++;
-
-          if (allObqEscalatedCaseIds.has(caseId)) {
-            sums.obqAHTWithEscMillis += specificAht;
-            counts.obqAHTWithEsc++;
-          } else {
-            sums.obqAHTWithoutEscMillis += specificAht;
-            counts.obqAHTWithoutEsc++;
-          }
-        }
-      });
-    });
-
-    output.caseIdsForTable = includedCaseIds;
-    if (counts.obqAHT > 0) {
-      output.avgObqAHTMins = (sums.obqAHTMillis / counts.obqAHT / 60000).toFixed(2);
-    }
-    if (counts.obqAHTWithEsc > 0) {
-      output.obqAHTMinsWithEscalations = (sums.obqAHTWithEscMillis / counts.obqAHTWithEsc / 60000).toFixed(2);
-    }
-    if (counts.obqAHTWithoutEsc > 0) {
-      output.obqAHTMinsWithoutEscalations = (sums.obqAHTWithoutEscMillis / counts.obqAHTWithoutEsc / 60000).toFixed(2);
-    }
-    return output;
-  } catch(e) {
-    Logger.log(`Error in getObqAhtKpi: ${e}`);
-    return output;
-  }
-}
+    </script>
+</body>
+</html>
